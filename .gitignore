@@ -11,8 +11,21 @@
 !.github/**/*
 !.gitignore
 
-# Ignore specific directories and files that shouldn't be uploaded
+# Include specific files requested by user
+!Requirements_transcribed.txt
+!รายละเอียดงานฟินฟิน1ทีมai.md
+!รายละเอียดงานฟินฟิน2ทีมai.md
+!finfin_client/
+!finfin_client/**/*
+
+# Ignore build artifacts and caches in finfin_client
+finfin_client/build/
+finfin_client/dist/
+finfin_client/installer/
+finfin_client/**/__pycache__/
+*.exe
+
+# Ignore other specific directories
 .claude/
-finfin_client/
 test_data/
 ตารางรับชำระ/
