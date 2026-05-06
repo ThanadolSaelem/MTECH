@@ -12,6 +12,7 @@ from docx.oxml import OxmlElement
 import copy, os
 
 SS = "/home/user/MTECH/manual_screenshots"
+_IMG_EXT = ".jpg"  # use compressed JPEG
 OUT = "/home/user/MTECH/คู่มือการใช้งาน_MTECH.docx"
 
 # ── Colour palette ────────────────────────────────────────────────────────────
@@ -343,7 +344,7 @@ class Manual:
             "ขั้นตอนนี้ทำเพียงครั้งเดียว — เมื่อตั้งค่าแล้วไม่ต้องทำซ้ำ "
             "เว้นแต่มีการเปลี่ยน GAS หรือ PEAK credentials")
 
-        self.image(f"{SS}/ss_settings.png", "หน้า Settings — กรอกข้อมูลเชื่อมต่อ")
+        self.image(f"{SS}/ss_settings{_IMG_EXT}", "หน้า Settings — กรอกข้อมูลเชื่อมต่อ")
 
         self.h2("3.1  กรอก GAS Web App URL และ API Key")
         self.body("ข้อมูลนี้รับจากทีม MTECH — ใส่แล้วกด Save Local เพื่อบันทึกลงเครื่อง")
@@ -390,7 +391,7 @@ class Manual:
     def _ch4(self) -> None:
         self.h1("บทที่ 4   หน้า Dashboard")
         self.body("หน้า Dashboard แสดงภาพรวมสถานะงานประจำเดือน — ใช้ตรวจสอบว่าแต่ละ Part ทำเสร็จแล้วหรือยัง")
-        self.image(f"{SS}/ss_dashboard.png", "หน้า Dashboard — ภาพรวมสถานะงาน")
+        self.image(f"{SS}/ss_dashboard{_IMG_EXT}", "หน้า Dashboard — ภาพรวมสถานะงาน")
 
         self.h2("4.1  การ์ดสถิติ 4 ใบ")
         self.body("แต่ละการ์ดแสดงตัวเลข 3 ค่า สีต่างกัน:")
@@ -430,7 +431,7 @@ class Manual:
             "หน้า Tasks คือศูนย์กลางการรันงานทั้งหมด — เลือก task ที่ต้องการ "
             "ใส่เดือน แล้วกดปุ่มนั้น ระบบจะส่งคำสั่งไปยัง GAS ทันที"
         )
-        self.image(f"{SS}/ss_tasks.png", "หน้า Tasks — รายการงานทั้งหมด")
+        self.image(f"{SS}/ss_tasks{_IMG_EXT}", "หน้า Tasks — รายการงานทั้งหมด")
 
         self.h2("5.1  วิธีใช้งานทั่วไป")
         self.steps([
@@ -486,7 +487,7 @@ class Manual:
             "หน้า Logs แสดงประวัติการทำงานของระบบ 80 แถวล่าสุด — "
             "ใช้ตรวจสอบเมื่อมี error หรือต้องการดู document number ที่ออกไป"
         )
-        self.image(f"{SS}/ss_logs.png", "หน้า Logs — บันทึกการทำงาน")
+        self.image(f"{SS}/ss_logs{_IMG_EXT}", "หน้า Logs — บันทึกการทำงาน")
 
         self.h2("6.1  วิธีดู Log")
         self.steps([
