@@ -435,7 +435,7 @@ fig.text(0.5, 0.98,
          'MTECH  FinFin Accounting Automation — API Flow Chart for PEAK Integration',
          ha='center', va='top', fontsize=15, fontweight='bold', color='#1F1F1F')
 fig.text(0.5, 0.965,
-         'บริษัท เอ็มพี เทค คอร์ปอเรชั่น จำกัด  |  Google Apps Script → PEAK Account API',
+         'บจ. เอ็มพี เทค คอร์ปอเรชั่น (สำนักงานใหญ่)  |  Google Apps Script → PEAK Account API',
          ha='center', va='top', fontsize=10, color='#555555')
 
 # Draw panels
