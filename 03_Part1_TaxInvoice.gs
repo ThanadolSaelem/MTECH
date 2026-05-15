@@ -33,12 +33,14 @@ function runPart1_TaxInvoice(sheetName) {
   const batchB_tax = []; // Case B tax invoice
   const batchB_rec = []; // Case B receipt
   let countSkip = 0, countError = 0;
+  const nameMap = {};    // invCode → customer name (for contact sync)
 
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
 
     const invCode = String(row[CONFIG.RECEIPT_COL.INV] || '').trim();
     if (!invCode) continue;
+    nameMap[invCode] = nameMap[invCode] || String(row[CONFIG.RECEIPT_COL.NAME] || '').trim();
 
     const amt = parseAmount(row[CONFIG.RECEIPT_COL.AMT]);
     if (amt <= 0) { countSkip++; continue; }
@@ -78,6 +80,18 @@ function runPart1_TaxInvoice(sheetName) {
       batchB_rec.push({
         rowIndex: i, invCode, ref: refRec,
         payload: buildReceiptOnlyPayload(invCode, payDate, amt, desc, payType, refRec),
+      });
+    }
+  }
+
+  // ─── Sync contacts to PEAK before submission ─────────────────────────────
+  {
+    const uniqueCodes = [...new Set([...batchA, ...batchB_tax].map(x => x.invCode))];
+    if (uniqueCodes.length > 0) {
+      toast(`⏳ Sync ${uniqueCodes.length} contacts...`, 'FinFin');
+      uniqueCodes.forEach(code => {
+        try { ensureContact_(code, nameMap[code] || ''); }
+        catch (e) { Logger.log(`Contact warn [${code}]: ${e.message}`); }
       });
     }
   }
