@@ -97,6 +97,19 @@ function runPart1_TaxInvoice(sheetName) {
     }
   }
 
+  // ─── Resolve contactId (UUID) for endpoints that require it ──────────────
+  // /receipts/allinone และ /invoices/queue ต้องการ contactId (UUID) ไม่ใช่ contactCode
+  // /receipts/queue ใช้ contactCode ปกติ — batchB_rec ไม่ต้องแก้
+  for (const item of [...batchA, ...batchB_tax]) {
+    const cid = getContactId_(item.invCode);
+    if (cid) {
+      item.payload.contactId = cid;
+      delete item.payload.contactCode;
+    } else {
+      Logger.log(`Part1: ไม่พบ contactId สำหรับ ${item.invCode} — อาจเกิด Missing Contact Data`);
+    }
+  }
+
   let countA = 0, countB = 0;
 
   // ─── Submit Case A (one by one) ───────────────────────────────────────────

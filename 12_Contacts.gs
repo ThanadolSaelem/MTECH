@@ -49,13 +49,14 @@ function ensureContactsBatch_(codeNameMap) {
     let confirmed = false;
 
     let postRes;
+    let contactUuid = null;
     try {
       postRes = callPeakAPI('post', '/contacts/', {
         PeakContacts: { contacts: [{ code, name: displayName, type: 5 }] },
       });
     } catch (e) {
       const msg = String(e.message);
-      // throw ด้วย duplicate → contact มีอยู่แล้ว → ถือว่า OK
+      // throw ด้วย duplicate → contact มีอยู่แล้ว → ถือว่า OK (UUID ไม่ทราบ — lazy GET ทีหลัง)
       if (/duplic|exist|already|มีอยู่/i.test(msg)) {
         confirmed = true;
       } else {
@@ -72,6 +73,9 @@ function ensureContactsBatch_(codeNameMap) {
       const rc = String((c && c.resCode) || (inner && inner.resCode) || '');
       if (rc === '200' || (c && c.id)) {
         confirmed = true;
+        contactUuid = (c && c.id) || null;  // เก็บ UUID จาก PEAK สำหรับ contactId ใน allinone
+      } else if (rc === '100') {
+        confirmed = true;  // duplicate — contact มีอยู่แล้ว, UUID ไม่อยู่ใน response นี้
       } else {
         const desc = (c && c.resDesc) || (inner && inner.resDesc) || JSON.stringify(postRes).slice(0, 200);
         Logger.log(`Contact NOT created [${code}]: resCode=${rc} — ${desc}`);
@@ -79,7 +83,7 @@ function ensureContactsBatch_(codeNameMap) {
     }
 
     if (confirmed) {
-      cache[code] = 1;
+      cache[code] = contactUuid || 1;  // เก็บ UUID ถ้ามี, ไม่งั้นเก็บ 1 (มีอยู่แล้ว, lazy GET ทีหลัง)
       newCount++;
       // Save every N to survive mid-loop timeout
       if (newCount % CONTACT_SYNC_SAVE_N_ === 0) {
@@ -97,6 +101,43 @@ function ensureContactsBatch_(codeNameMap) {
 
 function ensureContact_(invCode, name) {
   ensureContactsBatch_({ [String(invCode).trim()]: name });
+}
+
+// ─── UUID Lookup ──────────────────────────────────────────────────────────────
+
+/**
+ * คืน UUID (contactId) สำหรับ invCode — ใช้กับ /receipts/allinone และ /invoices/queue
+ * - ถ้า cache มี UUID แล้ว → คืนทันที
+ * - ถ้า cache มีแค่ 1 (มีอยู่แล้ว แต่ไม่รู้ UUID) → GET /contacts?code= แล้วเก็บ UUID ไว้
+ * - ถ้าไม่มีใน cache เลย → GET เพื่อตรวจสอบ
+ * @param {string} invCode
+ * @returns {string|null} UUID or null
+ */
+function getContactId_(invCode) {
+  const props = PropertiesService.getScriptProperties();
+  const cache = JSON.parse(props.getProperty(CONTACT_CACHE_KEY_) || '{}');
+  const code = String(invCode).trim();
+  const cached = cache[code];
+
+  // UUID already stored as string (> 10 chars to distinguish from '1')
+  if (typeof cached === 'string' && cached.length > 10) return cached;
+
+  // Contact known to exist (cached === 1) or unknown → lazy GET to fetch UUID
+  try {
+    const res = callPeakAPI('get', '/contacts', null, { code });
+    const contacts = res && res.PeakContacts && res.PeakContacts.contacts;
+    const c = Array.isArray(contacts) ? contacts[0] : contacts;
+    const uuid = c && c.id;
+    if (uuid) {
+      cache[code] = uuid;
+      props.setProperty(CONTACT_CACHE_KEY_, JSON.stringify(cache));
+      return uuid;
+    }
+    Logger.log(`getContactId_: no id in response for [${code}]`);
+  } catch (e) {
+    Logger.log(`getContactId_ GET error [${code}]: ${e.message}`);
+  }
+  return null;
 }
 
 // ─── Standalone Sync ─────────────────────────────────────────────────────────
