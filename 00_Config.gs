@@ -75,7 +75,7 @@ const CONFIG = {
     INST_TYPE:    2,  // ประเภทการชำระ (ง.8 / ดาวน์ / ปิดยอด)
     PAY_DATE:     3,  // วันที่รับชำระ (จากธนาคารจริง)
     TAX_DATE:     4,  // วันที่เปิดใบกำกับภาษี (Pi Nok ใส่ตาม Date Logic)
-    SMEMOVE_DOC:  5,  // ใบเสร็จรับเงินเดิมจาก smemove (IVF-)
+    SMEMOVE_DOC:  5,  // ใบเสร็จรับเงินเดิมจาก smemove (IVF-YYMMDD-NNN = ใบกำกับภาษี / IFF-YYMMDD-NNN = ค่าปรับ)
     NAME:         6,  // ชื่อลูกค้า
     AMT:          7,  // ยอดเงินรวม
     PEAK_DOC:     8,  // ← OUTPUT: เลขที่ใบกำกับ PEAK (auto-create column)

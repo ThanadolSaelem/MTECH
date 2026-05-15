@@ -48,6 +48,10 @@ function runPart1_TaxInvoice(sheetName) {
     const existingDoc = String(row[CONFIG.RECEIPT_COL.PEAK_DOC] || '').trim();
     if (existingDoc && existingDoc !== CONFIG.PROCESSING_MARKER) { countSkip++; continue; }
 
+    // smemove IFF- = ใบเสร็จค่าปรับ → Part 1 ไม่ออก ให้ Part 3 จัดการ
+    const smemoveDoc = String(row[CONFIG.RECEIPT_COL.SMEMOVE_DOC] || '').trim();
+    if (smemoveDoc.startsWith('IFF-')) { countSkip++; continue; }
+
     const payDate = toDate(row[CONFIG.RECEIPT_COL.PAY_DATE]);
     if (!payDate) {
       logEntry('Part1', sheetName, i, invCode, 'SKIP', '', 'ไม่มี PAY_DATE');
@@ -63,15 +67,19 @@ function runPart1_TaxInvoice(sheetName) {
     // ─── Mark PROCESSING ──────────────────────────────────────────────────
     writeReceiptCell_(sheet, i, CONFIG.RECEIPT_COL.PEAK_DOC, CONFIG.PROCESSING_MARKER);
 
+    // ใช้เลขที่ smemove (IVF-YYMMDD-NNN) เป็น code ใน PEAK เพื่อ reconcile ได้ตรง
+    // ถ้าไม่มี → ใช้ buildReference ตามปกติ
+    const smemoveTaxRef = smemoveDoc.startsWith('IVF-') ? smemoveDoc : null;
+
     if (dueDate && compareDates(payDate, dueDate) < 0) {
-      const ref = buildReference(invCode, installment || 'X', 'TAX');
+      const ref = smemoveTaxRef || buildReference(invCode, installment || 'X', 'TAX');
       batchA.push({
         rowIndex: i, invCode, ref,
         payload: buildAllinonePayload(invCode, payDate, amt, desc, payType, ref),
       });
     } else {
       const taxDate = dueDate || payDate;
-      const refTax = buildReference(invCode, installment || 'X', 'TAX');
+      const refTax = smemoveTaxRef || buildReference(invCode, installment || 'X', 'TAX');
       const refRec = buildReference(invCode, installment || 'X', 'REC');
       batchB_tax.push({
         rowIndex: i, invCode, ref: refTax,
