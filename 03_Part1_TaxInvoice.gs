@@ -108,20 +108,42 @@ function runPart1_TaxInvoice(sheetName) {
   // ─── Resolve contactId (UUID) for endpoints that require it ──────────────
   // /receipts/allinone และ /invoices/queue ต้องการ contactId (UUID) ไม่ใช่ contactCode
   // /receipts/queue ใช้ contactCode ปกติ — batchB_rec ไม่ต้องแก้
-  for (const item of [...batchA, ...batchB_tax]) {
+  // ถ้า contactId หาไม่ได้ (contact POST ล้มเหลว) → clear PROCESSING แล้ว skip แทนที่จะ submit แล้วได้ error
+  const resolvedA    = [];
+  const resolvedBtax = [];
+
+  for (const item of batchA) {
     const cid = getContactId_(item.invCode);
     if (cid) {
       item.payload.contactId = cid;
       delete item.payload.contactCode;
+      resolvedA.push(item);
     } else {
-      Logger.log(`Part1: ไม่พบ contactId สำหรับ ${item.invCode} — อาจเกิด Missing Contact Data`);
+      writeReceiptCell_(sheet, item.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, '');
+      logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'SKIP', '', 'ไม่พบ contactId — รัน Sync Contacts ก่อนแล้วลองใหม่');
+      countSkip++;
+    }
+  }
+  for (const item of batchB_tax) {
+    const cid = getContactId_(item.invCode);
+    if (cid) {
+      item.payload.contactId = cid;
+      delete item.payload.contactCode;
+      resolvedBtax.push(item);
+    } else {
+      writeReceiptCell_(sheet, item.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, '');
+      logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'SKIP', '', 'ไม่พบ contactId — รัน Sync Contacts ก่อนแล้วลองใหม่');
+      countSkip++;
+      // batchB_rec มีแถวเดียวกัน — clear ด้วย
+      const recItem = batchB_rec.find(r => r.rowIndex === item.rowIndex);
+      if (recItem) writeReceiptCell_(sheet, recItem.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, '');
     }
   }
 
   let countA = 0, countB = 0;
 
   // ─── Submit Case A (one by one) ───────────────────────────────────────────
-  for (const item of batchA) {
+  for (const item of resolvedA) {
     try {
       const res = callPeakAPI('post', '/receipts/allinone', { PeakReceipts: { receipts: [item.payload] } });
       const rec = (res.PeakReceipts && res.PeakReceipts.receipts && res.PeakReceipts.receipts[0]) || res;
@@ -137,8 +159,8 @@ function runPart1_TaxInvoice(sheetName) {
   }
 
   // ─── Submit Case B (queue) ────────────────────────────────────────────────
-  if (batchB_tax.length > 0) {
-    for (const chunk of chunkArray(batchB_tax, CONFIG.BATCH_SIZE)) {
+  if (resolvedBtax.length > 0) {
+    for (const chunk of chunkArray(resolvedBtax, CONFIG.BATCH_SIZE)) {
       try {
         const res = callPeakAPI('post', '/invoices/queue',
           { PeakInvoices: { invoices: chunk.map(x => x.payload) } });
