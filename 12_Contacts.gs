@@ -22,8 +22,8 @@ const CONTACT_SYNC_MAX_MS_  = 4.5 * 60 * 1000; // 4.5 min soft limit per call
 
 /**
  * Sync contacts สำหรับ invCode หลายรายการพร้อมกัน
- *   - POST สร้าง contact โดยตรง (ไม่ GET ก่อน — เร็วขึ้น 2x)
- *   - resCode 400 = duplicate → contact มีอยู่แล้ว → cache ได้เลย
+ *   - POST สร้าง contact และตรวจ inner contacts[0].resCode ก่อน cache
+ *   - ถ้า POST throw ด้วย error "duplicate/exist" → contact มีอยู่แล้ว → cache
  *   - บันทึก cache ทุก CONTACT_SYNC_SAVE_N_ รายการ → ข้อมูลไม่หายถ้า timeout
  *   - หยุดเมื่อ elapsed > CONTACT_SYNC_MAX_MS_ — ไม่ throw, ปล่อย Part 1 ทำงานต่อ
  * @param {{ [invCode]: name }} codeNameMap
@@ -46,26 +46,45 @@ function ensureContactsBatch_(codeNameMap) {
     }
 
     const displayName = (String(name || '').trim() || `สัญญา ${code}`).slice(0, 255);
+    let confirmed = false;
 
+    let postRes;
     try {
-      callPeakAPI('post', '/contacts/', {
+      postRes = callPeakAPI('post', '/contacts/', {
         PeakContacts: { contacts: [{ code, name: displayName, type: 5 }] },
       });
-      cache[code] = 1;
     } catch (e) {
       const msg = String(e.message);
-      if (msg.includes('400') || /duplic|exist|already/i.test(msg)) {
-        cache[code] = 1;  // duplicate = already exists
+      // throw ด้วย duplicate → contact มีอยู่แล้ว → ถือว่า OK
+      if (/duplic|exist|already|มีอยู่/i.test(msg)) {
+        confirmed = true;
       } else {
-        Logger.log(`Contact error [${code}]: ${msg}`);
-        continue;  // don't cache failed contacts
+        Logger.log(`Contact POST error [${code}]: ${msg}`);
+        // ไม่ cache — retry รันถัดไป
       }
     }
 
-    newCount++;
-    // Save every N to survive mid-loop timeout
-    if (newCount % CONTACT_SYNC_SAVE_N_ === 0) {
-      props.setProperty(CONTACT_CACHE_KEY_, JSON.stringify(cache));
+    // ตรวจ inner contacts[0].resCode จาก response
+    // (callPeakAPI ไม่ตรวจ contacts[0] เหมือน receipts/invoices)
+    if (!confirmed && postRes) {
+      const inner = postRes.PeakContacts;
+      const c = inner && (Array.isArray(inner.contacts) ? inner.contacts[0] : inner.contacts);
+      const rc = String((c && c.resCode) || (inner && inner.resCode) || '');
+      if (rc === '200' || (c && c.id)) {
+        confirmed = true;
+      } else {
+        const desc = (c && c.resDesc) || (inner && inner.resDesc) || JSON.stringify(postRes).slice(0, 200);
+        Logger.log(`Contact NOT created [${code}]: resCode=${rc} — ${desc}`);
+      }
+    }
+
+    if (confirmed) {
+      cache[code] = 1;
+      newCount++;
+      // Save every N to survive mid-loop timeout
+      if (newCount % CONTACT_SYNC_SAVE_N_ === 0) {
+        props.setProperty(CONTACT_CACHE_KEY_, JSON.stringify(cache));
+      }
     }
   }
 
@@ -164,4 +183,25 @@ function testGetContact() {
   const invCode = '1752485138';  // แก้เป็น invCode จริงก่อนรัน
   const res = callPeakAPI('get', '/contacts', null, { code: invCode });
   Logger.log(JSON.stringify(res, null, 2));
+}
+
+/**
+ * ทดสอบ POST สร้าง contact เดียวและ log full raw response
+ * รันก่อน runSyncContacts เพื่อดูว่า PEAK ตอบกลับอะไรกันแน่
+ */
+function debugContactCreate() {
+  const invCode = '1752485138';  // แก้เป็น invCode จริงก่อนรัน
+  const name    = 'ทดสอบลูกค้า';
+  const url = CONFIG.BASE_URL + '/contacts/';
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    headers: buildHeaders(),
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      PeakContacts: { contacts: [{ code: invCode, name, type: 5 }] },
+    }),
+    muteHttpExceptions: true,
+  });
+  Logger.log('HTTP: ' + res.getResponseCode());
+  Logger.log('BODY: ' + res.getContentText());
 }
