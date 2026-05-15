@@ -11,7 +11,7 @@
 // ─── PEAK Credentials (กรอกหลังได้รับจาก PEAK) ───────────────────────────
 const CONFIG = {
   CONNECT_ID: 'YOUR_CONNECT_ID',            // ← ยังรอ (อยู่ใน ZIP จาก PEAK)
-  CONNECT_PASSWORD: 'YOUR_CONNECT_PASSWORD', // ← ยังรอ (อยู่ใน ZIP จาก PEAK)
+  CONNECT_PASSWORD: 'M3DHAAAA20',            // Application Code จาก PEAK email
   USER_TOKEN: 'ccd8bef1-ce62-4432-9380-426bee768c34',  // MPTechCorporation UAT (15/05/2026)
   BASE_URL: 'http://peakengineapidev.azurewebsites.net/api/v1',  // UAT
 
