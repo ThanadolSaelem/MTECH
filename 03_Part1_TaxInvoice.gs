@@ -86,13 +86,14 @@ function runPart1_TaxInvoice(sheetName) {
 
   // ─── Sync contacts to PEAK before submission ─────────────────────────────
   {
-    const uniqueCodes = [...new Set([...batchA, ...batchB_tax].map(x => x.invCode))];
-    if (uniqueCodes.length > 0) {
-      toast(`⏳ Sync ${uniqueCodes.length} contacts...`, 'FinFin');
-      uniqueCodes.forEach(code => {
-        try { ensureContact_(code, nameMap[code] || ''); }
-        catch (e) { Logger.log(`Contact warn [${code}]: ${e.message}`); }
-      });
+    const batchCodes = {};
+    [...batchA, ...batchB_tax].forEach(x => {
+      if (!batchCodes[x.invCode]) batchCodes[x.invCode] = nameMap[x.invCode] || '';
+    });
+    const n = Object.keys(batchCodes).length;
+    if (n > 0) {
+      toast(`⏳ Sync ${n} contacts...`, 'FinFin');
+      ensureContactsBatch_(batchCodes);
     }
   }
 
