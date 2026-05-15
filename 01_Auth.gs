@@ -164,13 +164,64 @@ function callPeakAPI(method, path, payload, params) {
   }
 
   // PEAK returns HTTP 200 even for application-level errors
-  // ตรวจ error fields ที่พบบ่อยใน PEAK response
+  // ตรวจ top-level error flags
   if (data && (data.isSuccess === false || data.success === false)) {
     const errMsg = data.message || data.errorMessage || data.error || text;
     throw new Error(`PEAK API error: ${errMsg}`);
   }
 
+  // ตรวจ resCode ใน nested object (เช่น PeakReceipts.receipts[0].resCode = "400")
+  const topKey = data && Object.keys(data)[0];
+  if (topKey && data[topKey]) {
+    const inner = data[topKey];
+    // array case: receipts[0].resCode
+    const firstItem = Array.isArray(inner.receipts)   ? inner.receipts[0]
+                    : Array.isArray(inner.invoices)   ? inner.invoices[0]
+                    : Array.isArray(inner.creditNotes) ? inner.creditNotes[0]
+                    : null;
+    const resCode = (firstItem && firstItem.resCode) || inner.resCode;
+    if (resCode && String(resCode) !== '200') {
+      const resDesc = (firstItem && firstItem.resDesc) || inner.resDesc || text;
+      throw new Error(`PEAK API ${resCode}: ${resDesc}`);
+    }
+  }
+
   return data;
+}
+
+/**
+ * ทดสอบ receipts/allinone กับ 1 row และ log response เต็มๆ
+ * แก้ invCode/payDate/amount ตามข้อมูลจริงก่อนรัน
+ */
+function debugAllinone() {
+  const payload = {
+    code:         'DEBUG-TEST-001',
+    issuedDate:   '20260310',
+    dueDate:      '20260310',
+    contactCode:  '1752485138',
+    isTaxInvoice: 1,
+    remark:       'ทดสอบ debug',
+    products: [{
+      accountCode: CONFIG.ACCOUNT_CODE_SALES,
+      description: 'ทดสอบ',
+      quantity:    1,
+      price:       100,
+      vatType:     CONFIG.VAT_TYPE_7,
+    }],
+    paidPayments: {
+      paymentDate: '20260310',
+      payments: [{ amount: 107 }],
+    },
+  };
+  const res = UrlFetchApp.fetch(CONFIG.BASE_URL + '/receipts/allinone', {
+    method: 'post',
+    headers: buildHeaders(),
+    contentType: 'application/json',
+    payload: JSON.stringify({ PeakReceipts: { receipts: [payload] } }),
+    muteHttpExceptions: true,
+  });
+  Logger.log('HTTP: ' + res.getResponseCode());
+  Logger.log('BODY: ' + res.getContentText());
 }
 
 /**
