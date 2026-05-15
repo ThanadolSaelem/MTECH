@@ -34,10 +34,10 @@ const CONFIG = {
   // Sheet สัญญาใหม่ (Part 2)
   CONTRACT_SHEET_NAME: 'สัญญาใหม่',
 
-  // Sheet naming prefixes — ต่อท้ายด้วย "MM.YYYY" อัตโนมัติ → "Sum.05.2026"
-  SUM_SHEET_PREFIX: 'Sum.',
-  RECEIPT_SHEET_PREFIX: 'Receipt.',
-  STATEMENT_SHEET_PREFIX: 'SCB.',
+  // Sheet naming prefixes — ต่อท้ายด้วย "MM.YYYY" อัตโนมัติ → "Sum05.2026"
+  SUM_SHEET_PREFIX: 'Sum',
+  RECEIPT_SHEET_PREFIX: 'Receipt',
+  STATEMENT_SHEET_PREFIX: 'SCB',
 
   // Sheet ไฟล์รับคืนเครื่อง (อยู่คนละ Spreadsheet ได้)
   RETURN_SPREADSHEET_ID: 'SPREADSHEET_ID_OF_RETURN_FILE',
@@ -171,7 +171,7 @@ Object.assign(CONFIG.RETURN_COL, {
 
 function testSumSheet() {
   const ss = SpreadsheetApp.openById("123EwnVGDbuaBg0HTsZhpdX8EgKvfa7nja9ngfenN5Zo");
-  const sheet = ss.getSheetByName("Sum.03.2026");
+  const sheet = ss.getSheetByName("Sum03.2026");
   const data = sheet.getDataRange().getValues();
   Logger.log("จำนวนแถว: " + data.length);
   Logger.log("ตัวอย่างแถวแรก (ข้อมูลจริง): " + data[2]); // แถวที่ 3 เพราะมี header 2 แถว
