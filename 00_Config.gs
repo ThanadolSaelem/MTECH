@@ -10,7 +10,8 @@
 
 // ─── PEAK Credentials (กรอกหลังได้รับจาก PEAK) ───────────────────────────
 const CONFIG = {
-  CONNECT_ID: 'YOUR_CONNECT_ID',       // ← ยังรอ (เปิด ZIP ด้วย M3DHAAAA20)
+  CONNECT_ID: 'YOUR_CONNECT_ID',            // ← ยังรอ (อยู่ใน ZIP จาก PEAK)
+  CONNECT_PASSWORD: 'YOUR_CONNECT_PASSWORD', // ← ยังรอ (อยู่ใน ZIP จาก PEAK)
   USER_TOKEN: 'ccd8bef1-ce62-4432-9380-426bee768c34',  // MPTechCorporation UAT (15/05/2026)
   BASE_URL: 'http://peakengineapidev.azurewebsites.net/api/v1',  // UAT
 
@@ -21,8 +22,9 @@ const CONFIG = {
   ACCOUNT_CODE_AR: '110000',
 
   // ─── VAT / Payment Types ─────────────────────────────────────────────────
-  VAT_TYPE_7: 1,
-  VAT_TYPE_NONE: 3,
+  // PEAK: vatType 1=ไม่มี VAT, 2=VAT 0%, 3=VAT 7%
+  VAT_TYPE_7: 3,
+  VAT_TYPE_NONE: 1,
   PMT_TRANSFER: 8,
   PMT_CASH: 1,
 

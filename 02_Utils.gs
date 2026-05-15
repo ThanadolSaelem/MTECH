@@ -43,8 +43,9 @@ function formatDateForAPI(val) {
 
   if (isNaN(d.getTime())) return '';
 
+  // PEAK API ใช้ yyyyMMdd (ไม่มีขีด) เช่น "20260415"
   const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
 }
 
 /**

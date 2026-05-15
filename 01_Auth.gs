@@ -68,7 +68,7 @@ function getClientToken() {
   const ts = buildTimeStamp();
   const sig = hmacSha1Hex(ts, CONFIG.CONNECT_ID);
 
-  const url = `${CONFIG.BASE_URL}/ClientToken`;
+  const url = `${CONFIG.BASE_URL}/clienttoken`;
   const options = {
     method: 'post',
     contentType: 'application/json',
@@ -77,8 +77,9 @@ function getClientToken() {
       'Time-Signature': sig,
     },
     payload: JSON.stringify({
-      peakClientToken: {
+      PeakClientToken: {
         connectId: CONFIG.CONNECT_ID,
+        password:  CONFIG.CONNECT_PASSWORD,
       },
     }),
     muteHttpExceptions: true,
@@ -87,14 +88,15 @@ function getClientToken() {
   const res = UrlFetchApp.fetch(url, options);
   const data = JSON.parse(res.getContentText());
 
-  if (res.getResponseCode() !== 200 || !data.clientToken) {
+  const token = data && data.PeakClientToken && data.PeakClientToken.token;
+  if (res.getResponseCode() !== 200 || !token) {
     throw new Error(`getClientToken failed: ${res.getContentText()}`);
   }
 
-  props.setProperty('PEAK_CLIENT_TOKEN', data.clientToken);
+  props.setProperty('PEAK_CLIENT_TOKEN', token);
   props.setProperty('PEAK_CLIENT_TOKEN_TS', String(Date.now()));
 
-  return data.clientToken;
+  return token;
 }
 
 // ─── Build Request Headers ────────────────────────────────────────────────────
