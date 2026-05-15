@@ -6,83 +6,86 @@
  *
  * type 5 = บุคคลธรรมดา (individual) — MPTECH customers are individuals.
  *
- * Performance: confirmed contacts are cached in ScriptProperties.
- * First run: GET+POST each new contact (~1s each). Subsequent runs: skip API call entirely.
+ * Performance strategy:
+ *   - Cache confirmed contacts in ScriptProperties (survives between runs)
+ *   - Write cache every 20 new contacts (survives mid-loop timeout)
+ *   - POST-first, no GET check (halves API calls)
+ *   - Time guard: stop sync at 4.5 min, let Part 1 continue for synced contacts
+ *     → unsynced contacts → receipt fails → PEAK_DOC cleared → retried next run
  */
 
-const CONTACT_CACHE_KEY_ = 'PEAK_SYNCED_CONTACTS';
+const CONTACT_CACHE_KEY_    = 'PEAK_SYNCED_CONTACTS';
+const CONTACT_SYNC_SAVE_N_  = 20;               // write cache every N new contacts
+const CONTACT_SYNC_MAX_MS_  = 4.5 * 60 * 1000; // 4.5 min soft limit per call
 
-// ─── Batch Sync (used by Part 1, Part 2, Part 3) ─────────────────────────────
+// ─── Batch Sync (called by Part 1 / Part 2 / Part 3) ─────────────────────────
 
 /**
  * Sync contacts สำหรับ invCode หลายรายการพร้อมกัน
- * อ่าน/เขียน ScriptProperties แค่ครั้งเดียว — เร็วกว่า loop ensureContact_
+ *   - POST สร้าง contact โดยตรง (ไม่ GET ก่อน — เร็วขึ้น 2x)
+ *   - resCode 400 = duplicate → contact มีอยู่แล้ว → cache ได้เลย
+ *   - บันทึก cache ทุก CONTACT_SYNC_SAVE_N_ รายการ → ข้อมูลไม่หายถ้า timeout
+ *   - หยุดเมื่อ elapsed > CONTACT_SYNC_MAX_MS_ — ไม่ throw, ปล่อย Part 1 ทำงานต่อ
  * @param {{ [invCode]: name }} codeNameMap
  */
 function ensureContactsBatch_(codeNameMap) {
-  const props = PropertiesService.getScriptProperties();
-  const raw   = props.getProperty(CONTACT_CACHE_KEY_);
-  const cache = raw ? JSON.parse(raw) : {};
-
-  let changed = false;
+  const props  = PropertiesService.getScriptProperties();
+  const raw    = props.getProperty(CONTACT_CACHE_KEY_);
+  const cache  = raw ? JSON.parse(raw) : {};
+  const start  = Date.now();
+  let newCount = 0;
 
   for (const [invCode, name] of Object.entries(codeNameMap)) {
     const code = String(invCode).trim();
-    if (!code || cache[code]) continue;  // already confirmed → skip API
+    if (!code || cache[code]) continue;  // cached → skip API call
+
+    // Time guard: stop if near 4.5 min (GAS hard limit = 6 min)
+    if (Date.now() - start > CONTACT_SYNC_MAX_MS_) {
+      Logger.log(`Contact sync: time limit — cached ${newCount} this run, re-run to continue`);
+      break;
+    }
 
     const displayName = (String(name || '').trim() || `สัญญา ${code}`).slice(0, 255);
-    let confirmed = false;
 
-    // ลอง GET ก่อน
     try {
-      const res = callPeakAPI('get', '/contacts', null, { code });
-      const inner = res && res.PeakContacts;
-      if (inner) {
-        const c = inner.contacts;
-        confirmed = Array.isArray(c) ? c.length > 0 : !!(c && (c.id || c.code));
-      }
-    } catch (_) {}
-
-    if (!confirmed) {
-      // POST สร้างใหม่
-      try {
-        callPeakAPI('post', '/contacts/', {
-          PeakContacts: { contacts: [{ code, name: displayName, type: 5 }] },
-        });
-        confirmed = true;
-      } catch (e) {
-        const msg = String(e.message);
-        // resCode 400 = duplicate → contact มีอยู่แล้ว
-        if (msg.includes('400') || /duplic|exist|already/i.test(msg)) {
-          confirmed = true;
-        } else {
-          Logger.log(`Contact error [${code}]: ${msg}`);
-        }
+      callPeakAPI('post', '/contacts/', {
+        PeakContacts: { contacts: [{ code, name: displayName, type: 5 }] },
+      });
+      cache[code] = 1;
+    } catch (e) {
+      const msg = String(e.message);
+      if (msg.includes('400') || /duplic|exist|already/i.test(msg)) {
+        cache[code] = 1;  // duplicate = already exists
+      } else {
+        Logger.log(`Contact error [${code}]: ${msg}`);
+        continue;  // don't cache failed contacts
       }
     }
 
-    if (confirmed) {
-      cache[code] = 1;
-      changed = true;
+    newCount++;
+    // Save every N to survive mid-loop timeout
+    if (newCount % CONTACT_SYNC_SAVE_N_ === 0) {
+      props.setProperty(CONTACT_CACHE_KEY_, JSON.stringify(cache));
     }
   }
 
-  if (changed) {
+  if (newCount > 0) {
     props.setProperty(CONTACT_CACHE_KEY_, JSON.stringify(cache));
   }
 }
 
-// ─── Single-contact wrapper (backward compat) ────────────────────────────────
+// ─── Single-contact wrapper ───────────────────────────────────────────────────
 
 function ensureContact_(invCode, name) {
   ensureContactsBatch_({ [String(invCode).trim()]: name });
 }
 
-// ─── Standalone sync (รันแยกก่อน Part 1 ถ้าต้องการ) ─────────────────────────
+// ─── Standalone Sync ─────────────────────────────────────────────────────────
 
 /**
- * Sync contacts ทั้งหมดจาก Receipt sheet ไปยัง PEAK
- * รัน re-run ได้หลายรอบ — contacts ที่ sync แล้วจะข้ามทันที (< 0.1s)
+ * Sync contacts ทั้งหมดจาก Receipt sheet
+ * รันซ้ำได้หลายรอบ — contacts ที่ sync แล้วข้ามเลย (cache)
+ * ถ้า timeout → รันซ้ำ → ดูผลใน Execution Log
  * @param {string} [sheetName]
  */
 function runSyncContacts(sheetName) {
@@ -91,9 +94,7 @@ function runSyncContacts(sheetName) {
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error(`ไม่พบ Sheet "${sheetName}"`);
 
-  toast(`⏳ Sync Contacts — ${sheetName}`, 'FinFin');
   const data = getReceiptData_(sheet);
-
   const codeNameMap = {};
   for (const row of data) {
     const code = String(row[CONFIG.RECEIPT_COL.INV] || '').trim();
@@ -103,10 +104,18 @@ function runSyncContacts(sheetName) {
   }
 
   const total = Object.keys(codeNameMap).length;
-  toast(`⏳ Syncing ${total} unique contacts...`, 'FinFin');
+  toast(`⏳ Syncing ${total} contacts...`, 'FinFin');
   ensureContactsBatch_(codeNameMap);
 
-  const summary = `Sync Contacts เสร็จ — ${total} รายการ`;
+  const cache = JSON.parse(
+    PropertiesService.getScriptProperties().getProperty(CONTACT_CACHE_KEY_) || '{}'
+  );
+  const done = Object.keys(codeNameMap).filter(c => cache[c]).length;
+  const left = total - done;
+
+  const summary = left > 0
+    ? `Sync Contacts: ${done}/${total} — เหลือ ${left} รายการ กรุณารันซ้ำ`
+    : `Sync Contacts เสร็จ ✅ (${done} รายการ)`;
   toast(summary, 'FinFin', 10);
   Logger.log(summary);
   return summary;
@@ -115,9 +124,8 @@ function runSyncContacts(sheetName) {
 // ─── Cleanup Helpers ─────────────────────────────────────────────────────────
 
 /**
- * ล้างค่า PEAK_DOC ที่เป็น JSON blob (จาก bug เก่าที่เขียน raw response ลงไป)
+ * ล้าง PEAK_DOC ที่เป็น JSON blob หรือ PROCESSING ค้าง
  * รันก่อน Part 1 ถ้าเคยรันแล้วได้ JSON blob ใน column PEAK_DOC
- * @param {string} [sheetName]
  */
 function clearBadPeakDocs(sheetName) {
   sheetName = sheetName || getCurrentReceiptSheetName();
@@ -130,7 +138,6 @@ function clearBadPeakDocs(sheetName) {
 
   for (let i = 0; i < data.length; i++) {
     const val = String(data[i][CONFIG.RECEIPT_COL.PEAK_DOC] || '').trim();
-    // JSON blob (starts with "{") หรือ stuck PROCESSING_MARKER
     if (val.startsWith('{') || val === CONFIG.PROCESSING_MARKER) {
       writeReceiptCell_(sheet, i, CONFIG.RECEIPT_COL.PEAK_DOC, '');
       cleared++;
@@ -144,7 +151,7 @@ function clearBadPeakDocs(sheetName) {
 }
 
 /**
- * รีเซ็ต contact sync cache (รันเมื่อ UAT reset หรือ PEAK สลับ environment)
+ * รีเซ็ต contact sync cache (รันเมื่อ PEAK reset หรือสลับ environment)
  */
 function clearContactSyncCache() {
   PropertiesService.getScriptProperties().deleteProperty(CONTACT_CACHE_KEY_);
