@@ -561,6 +561,48 @@ function debugPart1Row() {
   } else {
     Logger.log('⚠️ ข้าม Step 8: contactUuid=' + contactUuid + ', pmtUuid=' + pmtUuid);
   }
+
+  // ─── Step 9: account code 410000 ไม่มีในระบบ → GET list แล้วลองหลาย code ──
+  // Step 8a/8b ผ่าน payment method (nested paymentMethod{id,code}) แล้ว
+  // เหลือ accountCode — 410000 ไม่ valid; PEAK doc แนะนำ 410101 (ขาย), 410301 (บริการ)
+  Logger.log('─── Step 9: GET /dailyjournals/accountcode ───');
+  try {
+    const acRes = callPeakAPI('get', '/dailyjournals/accountcode', null, { page: 1 });
+    Logger.log('AccountCodes (raw): ' + JSON.stringify(acRes).slice(0, 2000));
+  } catch (e) {
+    Logger.log('GET accountcode error: ' + e.message);
+  }
+
+  if (contactUuid && pmtUuid) {
+    const codesToTry = ['410101', '410301', '410201', '410302', '410000'];
+    for (const ac of codesToTry) {
+      const refY = 'DEBUG-AC-' + ac + '-' + Date.now();
+      const payloadY = {
+        code:         refY,
+        issuedDate:   formatDateForAPI(payDate),
+        dueDate:      formatDateForAPI(payDate),
+        contact:      { id: contactUuid, code: invCode },
+        istaxInvoice: 1,
+        remark:       desc,
+        products: [{
+          accountCode: ac,
+          description: desc, quantity: 1, price: amt, vatType: CONFIG.VAT_TYPE_7,
+        }],
+        paidPayments: {
+          paymentDate: formatDateForAPI(payDate),
+          payments: [{ paymentMethod: { id: pmtUuid, code: 'CSH001' }, amount: amt }],
+        },
+      };
+      Logger.log('─── Step 9 accountCode=' + ac + ' ───');
+      const resY = UrlFetchApp.fetch(CONFIG.BASE_URL + '/receipts/allinone', {
+        method: 'post', headers: buildHeaders(), contentType: 'application/json',
+        payload: JSON.stringify({ PeakReceipts: { receipts: [payloadY] } }),
+        muteHttpExceptions: true,
+      });
+      Logger.log('HTTP 9-' + ac + ': ' + resY.getResponseCode());
+      Logger.log('BODY 9-' + ac + ': ' + resY.getContentText());
+    }
+  }
 }
 
 // ─── Part 1 ส่วนเสริม: ค่าบริการเพิ่มเติม (อ่านจาก Sum sheet) ────────────────
