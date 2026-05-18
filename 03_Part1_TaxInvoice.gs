@@ -30,16 +30,17 @@ function runPart1_TaxInvoice(sheetName) {
   toast(`⏳ Part 1 — ${sheetName}`, 'FinFin');
 
   // ─── Time guard: GAS hard limit = 6 min. หยุดที่ 5 min เผื่อ cleanup ────────
-  const startMs   = Date.now();
+  const startMs    = Date.now();
   const MAX_RUN_MS = 5 * 60 * 1000;
   const timeUp = () => (Date.now() - startMs) > MAX_RUN_MS;
   let stoppedEarly = false;
 
-  const batchA = [];     // Case A allinone
-  const batchB_tax = []; // Case B tax invoice
-  const batchB_rec = []; // Case B receipt
+  // ─── First pass: collect raw items (no payloads yet) ─────────────────────
+  const rawA    = [];  // Case A: allinone (payDate < dueDate)
+  const rawBtax = [];  // Case B: tax invoice via queue
+  const rawBrec = [];  // Case B: receipt via queue
   let countSkip = 0, countError = 0;
-  const nameMap = {};    // invCode → customer name (for contact sync)
+  const nameMap = {};
 
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
@@ -68,40 +69,28 @@ function runPart1_TaxInvoice(sheetName) {
     const dueDate = toDate(row[CONFIG.RECEIPT_COL.DUE_DATE]);
     const installment = String(row[CONFIG.RECEIPT_COL.INST_TYPE] || '').trim();
     const desc = buildReceiptDescription_(installment, invCode);
-    const payType = CONFIG.PMT_TRANSFER;  // default — Receipt sheet ไม่มีช่องระบุวิธีการชำระ
 
-    // ─── Mark PROCESSING ──────────────────────────────────────────────────
     writeReceiptCell_(sheet, i, CONFIG.RECEIPT_COL.PEAK_DOC, CONFIG.PROCESSING_MARKER);
 
     // ใช้เลขที่ smemove (IVF-YYMMDD-NNN) เป็น code ใน PEAK เพื่อ reconcile ได้ตรง
-    // ถ้าไม่มี → ใช้ buildReference ตามปกติ
     const smemoveTaxRef = smemoveDoc.startsWith('IVF-') ? smemoveDoc : null;
 
     if (dueDate && compareDates(payDate, dueDate) < 0) {
       const ref = smemoveTaxRef || buildReference(invCode, installment || 'X', 'TAX');
-      batchA.push({
-        rowIndex: i, invCode, ref,
-        payload: buildAllinonePayload(invCode, payDate, amt, desc, payType, ref),
-      });
+      rawA.push({ rowIndex: i, invCode, payDate, amt, desc, ref });
     } else {
       const taxDate = dueDate || payDate;
       const refTax = smemoveTaxRef || buildReference(invCode, installment || 'X', 'TAX');
       const refRec = buildReference(invCode, installment || 'X', 'REC');
-      batchB_tax.push({
-        rowIndex: i, invCode, ref: refTax,
-        payload: buildTaxInvoiceOnlyPayload(invCode, taxDate, amt, desc, refTax),
-      });
-      batchB_rec.push({
-        rowIndex: i, invCode, ref: refRec,
-        payload: buildReceiptOnlyPayload(invCode, payDate, amt, desc, payType, refRec),
-      });
+      rawBtax.push({ rowIndex: i, invCode, taxDate, amt, desc, ref: refTax });
+      rawBrec.push({ rowIndex: i, invCode, payDate, amt, desc, ref: refRec });
     }
   }
 
   // ─── Sync contacts to PEAK before submission ─────────────────────────────
   {
     const batchCodes = {};
-    [...batchA, ...batchB_tax].forEach(x => {
+    [...rawA, ...rawBtax].forEach(x => {
       if (!batchCodes[x.invCode]) batchCodes[x.invCode] = nameMap[x.invCode] || '';
     });
     const n = Object.keys(batchCodes).length;
@@ -111,41 +100,64 @@ function runPart1_TaxInvoice(sheetName) {
     }
   }
 
-  // ─── Resolve contacts before submission ───────────────────────────────────
-  // /receipts/allinone ใช้ contactCode (contact ต้องมีอยู่ใน PEAK แล้ว — ผ่าน ensureContactsBatch_)
-  // /invoices/queue   ต้องการ contactId (UUID) — lazy GET ถ้า cache มีแค่ 1
-  // /receipts/queue   ใช้ contactCode — batchB_rec ไม่ต้องแก้
+  // ─── Fetch payment methods once ──────────────────────────────────────────
+  let pmtMap = {};
+  try {
+    pmtMap = getPaymentMethodMap_();
+    Logger.log('Payment methods: ' + JSON.stringify(pmtMap));
+  } catch (e) {
+    Logger.log('⚠️ ไม่สามารถดึง payment methods: ' + e.message);
+  }
+
+  // ─── Resolve contacts + build payloads ──────────────────────────────────
+  // contact UUID จำเป็นสำหรับทุก endpoint (/receipts/allinone, /invoices/queue, /receipts/queue)
+  const contactUuidCache = {};
   const resolvedA    = [];
   const resolvedBtax = [];
 
-  // Case A — allinone: ตรวจ cache เท่านั้น (ไม่ lazy GET → เร็ว)
-  for (const item of batchA) {
+  // Case A — allinone
+  for (const item of rawA) {
     if (timeUp()) { stoppedEarly = true; break; }
-    if (isContactSynced_(item.invCode)) {
-      resolvedA.push(item);  // payload คง contactCode ไว้ — allinone ใช้ contactCode
-    } else {
+    const contactUuid = contactUuidCache[item.invCode] || getContactId_(item.invCode);
+    if (!contactUuid) {
       writeReceiptCell_(sheet, item.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, '');
-      logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'SKIP', '', 'Contact ยังไม่ sync — รัน Sync Contacts ก่อน');
+      logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'SKIP', '', 'ไม่พบ contactId — รัน Sync Contacts ก่อน');
       countSkip++;
+      continue;
     }
+    contactUuidCache[item.invCode] = contactUuid;
+    const pmtInfo = pmtMap[CONFIG.PMT_TRANSFER] || pmtMap[CONFIG.PMT_CASH];
+    if (!pmtInfo) {
+      writeReceiptCell_(sheet, item.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, '');
+      logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'SKIP', '', 'ไม่พบ payment method ใน PEAK — ตั้งค่า "โอนเงิน" ใน PEAK ก่อน');
+      countSkip++;
+      continue;
+    }
+    item.payload = buildAllinonePayload(
+      item.invCode, contactUuid, item.payDate, item.amt, item.desc,
+      pmtInfo.id, pmtInfo.code, item.ref,
+    );
+    resolvedA.push(item);
   }
-  // Case B — invoices/queue: ต้องการ contactId (UUID)
+
+  // Case B — invoices/queue
   if (!stoppedEarly) {
-    for (const item of batchB_tax) {
+    for (const item of rawBtax) {
       if (timeUp()) { stoppedEarly = true; break; }
-      const cid = getContactId_(item.invCode);
-      if (cid) {
-        item.payload.contactId = cid;
-        delete item.payload.contactCode;
-        resolvedBtax.push(item);
-      } else {
+      const contactUuid = contactUuidCache[item.invCode] || getContactId_(item.invCode);
+      if (!contactUuid) {
         writeReceiptCell_(sheet, item.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, '');
-        logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'SKIP', '', 'ไม่พบ contactId — รัน Sync Contacts ก่อนแล้วลองใหม่');
+        logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'SKIP', '', 'ไม่พบ contactId — รัน Sync Contacts ก่อน');
         countSkip++;
-        // batchB_rec มีแถวเดียวกัน — clear ด้วย
-        const recItem = batchB_rec.find(r => r.rowIndex === item.rowIndex);
+        const recItem = rawBrec.find(r => r.rowIndex === item.rowIndex);
         if (recItem) writeReceiptCell_(sheet, recItem.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, '');
+        continue;
       }
+      contactUuidCache[item.invCode] = contactUuid;
+      item.payload = buildTaxInvoiceOnlyPayload(
+        item.invCode, contactUuid, item.taxDate, item.amt, item.desc, item.ref,
+      );
+      resolvedBtax.push(item);
     }
   }
 
@@ -168,7 +180,7 @@ function runPart1_TaxInvoice(sheetName) {
     }
   }
 
-  // ─── Submit Case B (queue) ────────────────────────────────────────────────
+  // ─── Submit Case B tax (queue) ────────────────────────────────────────────
   if (!stoppedEarly && resolvedBtax.length > 0) {
     for (const chunk of chunkArray(resolvedBtax, CONFIG.BATCH_SIZE)) {
       if (timeUp()) { stoppedEarly = true; break; }
@@ -192,15 +204,24 @@ function runPart1_TaxInvoice(sheetName) {
       }
     }
   }
-  // batchB_rec: ส่งเฉพาะแถวที่ tax invoice ผ่าน (resolvedBtax) — แถวที่ skip ไปแล้วไม่ต้องส่ง
+
+  // ─── Submit Case B receipt (queue) ───────────────────────────────────────
   const resolvedTaxRows = new Set(resolvedBtax.map(t => t.rowIndex));
-  const resolvedBrec = batchB_rec.filter(r => resolvedTaxRows.has(r.rowIndex));
+  const resolvedBrec = rawBrec.filter(r => resolvedTaxRows.has(r.rowIndex));
   if (!stoppedEarly && resolvedBrec.length > 0) {
+    const pmtInfo = pmtMap[CONFIG.PMT_TRANSFER] || pmtMap[CONFIG.PMT_CASH];
     for (const chunk of chunkArray(resolvedBrec, CONFIG.BATCH_SIZE)) {
       if (timeUp()) { stoppedEarly = true; break; }
       try {
+        const payloads = chunk.map(x => {
+          const cUuid = contactUuidCache[x.invCode] || '';
+          return buildReceiptOnlyPayload(
+            x.invCode, cUuid, x.payDate, x.amt, x.desc,
+            pmtInfo ? pmtInfo.id : '', pmtInfo ? pmtInfo.code : '', x.ref,
+          );
+        });
         const res = callPeakAPI('post', '/receipts/queue',
-          { PeakReceipts: { receipts: chunk.map(x => x.payload) } });
+          { PeakReceipts: { receipts: payloads } });
         const queueId = res.queueId || res.id || 'unknown';
         saveQueueEntry('receipt', queueId, sheetName,
           chunk.map(x => ({
@@ -228,54 +249,18 @@ function runPart1_TaxInvoice(sheetName) {
 }
 
 // ─── Payload Builders ─────────────────────────────────────────────────────────
+// Format ยืนยันจาก debug Step 10a (2026-05-18): resCode=200 ✅
+//   contact:{id,code}  istaxInvoice  taxStatus:1  accountCode:410101
+//   paidPayments.payments:[{paymentMethod:{id,code}, amount}]
 
-function buildAllinonePayload(invCode, payDate, amount, desc, payType, ref) {
+function buildAllinonePayload(invCode, contactUuid, payDate, amount, desc, pmtUuid, pmtCode, ref) {
   return {
     code:         ref,
     issuedDate:   formatDateForAPI(payDate),
     dueDate:      formatDateForAPI(payDate),
-    contactCode:  String(invCode),
-    isTaxInvoice: true,
-    remark:       desc,
-    products: [{
-      accountCode: CONFIG.ACCOUNT_CODE_SALES,
-      description: desc,
-      quantity:    1,
-      price:       amount,
-      vatType:     CONFIG.VAT_TYPE_7,
-    }],
-    paidPayments: {
-      paymentDate:    formatDateForAPI(payDate),
-      paymentMethods: [{ type: payType, amount: amount }],
-    },
-  };
-}
-
-function buildTaxInvoiceOnlyPayload(invCode, taxDate, amount, desc, ref) {
-  return {
-    code:         ref,
-    issuedDate:   formatDateForAPI(taxDate),
-    dueDate:      formatDateForAPI(taxDate),
-    contactCode:  String(invCode),
-    isTaxInvoice: true,
-    remark:       desc,
-    products: [{
-      accountCode: CONFIG.ACCOUNT_CODE_SALES,
-      description: desc,
-      quantity:    1,
-      price:       amount,
-      vatType:     CONFIG.VAT_TYPE_7,
-    }],
-  };
-}
-
-function buildReceiptOnlyPayload(invCode, payDate, amount, desc, payType, ref) {
-  return {
-    code:         ref,
-    issuedDate:   formatDateForAPI(payDate),
-    dueDate:      formatDateForAPI(payDate),
-    contactCode:  String(invCode),
-    isTaxInvoice: false,
+    contact:      { id: contactUuid, code: String(invCode) },
+    istaxInvoice: 1,
+    taxStatus:    1,  // 1=รวมภาษี: ยอดที่จ่ายคือ total รวม VAT แล้ว
     remark:       desc,
     products: [{
       accountCode: CONFIG.ACCOUNT_CODE_SALES,
@@ -286,28 +271,72 @@ function buildReceiptOnlyPayload(invCode, payDate, amount, desc, payType, ref) {
     }],
     paidPayments: {
       paymentDate: formatDateForAPI(payDate),
-      payments: [{ amount: amount }],
+      payments:    [{ paymentMethod: { id: pmtUuid, code: pmtCode }, amount: amount }],
     },
   };
 }
 
+function buildTaxInvoiceOnlyPayload(invCode, contactUuid, taxDate, amount, desc, ref) {
+  return {
+    code:         ref,
+    issuedDate:   formatDateForAPI(taxDate),
+    dueDate:      formatDateForAPI(taxDate),
+    contact:      { id: contactUuid, code: String(invCode) },
+    istaxInvoice: 1,
+    taxStatus:    1,
+    remark:       desc,
+    products: [{
+      accountCode: CONFIG.ACCOUNT_CODE_SALES,
+      description: desc,
+      quantity:    1,
+      price:       amount,
+      vatType:     CONFIG.VAT_TYPE_7,
+    }],
+  };
+}
+
+function buildReceiptOnlyPayload(invCode, contactUuid, payDate, amount, desc, pmtUuid, pmtCode, ref) {
+  return {
+    code:         ref,
+    issuedDate:   formatDateForAPI(payDate),
+    dueDate:      formatDateForAPI(payDate),
+    contact:      { id: contactUuid, code: String(invCode) },
+    istaxInvoice: 0,
+    remark:       desc,
+    products: [{
+      accountCode: CONFIG.ACCOUNT_CODE_SALES,
+      description: desc,
+      quantity:    1,
+      price:       amount,
+      vatType:     CONFIG.VAT_TYPE_7,
+    }],
+    paidPayments: {
+      paymentDate: formatDateForAPI(payDate),
+      payments:    [{ paymentMethod: { id: pmtUuid, code: pmtCode }, amount: amount }],
+    },
+  };
+}
+
+// ดึง payment methods ทั้งหมด คืน map: { [type]: { id, code } }
+function getPaymentMethodMap_() {
+  const res = callPeakAPI('get', '/paymentmethods', null, { page: 1 });
+  const pms = res && res.PeakPaymentMethods && res.PeakPaymentMethods.paymentMethods;
+  const map = {};
+  if (Array.isArray(pms)) {
+    pms.forEach(pm => { if (pm.type != null) map[pm.type] = { id: pm.id, code: pm.code }; });
+  }
+  return map;
+}
+
 // ─── Helpers (Receipt-sheet specific) ─────────────────────────────────────────
 
-/**
- * เพิ่มคอลัมน์ "เลขที่ PEAK" (I) ถ้ายังไม่มี
- */
 function ensureReceiptHeader_(sheet) {
   const headerRow = CONFIG.RECEIPT_HEADER_ROW;
   const lastCol = sheet.getLastColumn();
   if (lastCol >= CONFIG.RECEIPT_COL.PEAK_DOC + 1) return;
-
   sheet.getRange(headerRow, CONFIG.RECEIPT_COL.PEAK_DOC + 1).setValue('เลขที่ PEAK');
 }
 
-/**
- * เขียนค่าเข้า Receipt sheet (1-indexed row, col)
- * +1 (header) +1 (0→1)
- */
 function writeReceiptCell_(sheet, rowIndex, col, value) {
   sheet.getRange(rowIndex + CONFIG.RECEIPT_HEADER_ROW + 1, col + 1).setValue(value);
 }
@@ -328,14 +357,10 @@ function chunkArray(arr, size) {
   return chunks;
 }
 
-/**
- * ทดสอบ allinone กับ 1 แถวจริงจาก Receipt sheet แล้ว log raw response
- * แก้ sheetName และ dataRowIndex (0-based จาก header) ก่อนรัน
- * ใช้เพื่อ diagnose ว่า PEAK ตอบอะไรกันแน่
- */
+// ทดสอบ allinone 1 แถวด้วย production payload format ที่ยืนยันแล้ว
 function debugPart1Row() {
-  const sheetName = getCurrentReceiptSheetName();  // หรือใส่ชื่อ sheet ตรงๆ
-  const dataRowIndex = 0;  // 0 = แถวข้อมูลแถวแรก (ไม่นับ header)
+  const sheetName = getCurrentReceiptSheetName();
+  const dataRowIndex = 0;
 
   const ss = SpreadsheetApp.openById(getSpreadsheetId());
   const sheet = ss.getSheetByName(sheetName);
@@ -350,18 +375,24 @@ function debugPart1Row() {
   const payDate = toDate(row[CONFIG.RECEIPT_COL.PAY_DATE]);
   const inst    = String(row[CONFIG.RECEIPT_COL.INST_TYPE] || '').trim();
   const desc    = buildReceiptDescription_(inst, invCode);
-  const ref     = 'DEBUG-' + invCode + '-' + Date.now();
 
-  Logger.log(`Row ${dataRowIndex}: invCode=${invCode}, amt=${amt}, payDate=${payDate}`);
+  Logger.log(`▼ Row ${dataRowIndex}: invCode=${invCode}, amt=${amt}, payDate=${payDate}`);
 
-  const payload = buildAllinonePayload(invCode, payDate, amt, desc, CONFIG.PMT_TRANSFER, ref);
-  Logger.log('Payload: ' + JSON.stringify(payload, null, 2));
+  const contactUuid = getContactId_(invCode);
+  Logger.log('contactUuid: ' + contactUuid);
+  if (!contactUuid) { Logger.log('⚠️ ไม่พบ contact — รัน Sync Contacts ก่อน'); return; }
 
-  const url = CONFIG.BASE_URL + '/receipts/allinone';
-  const res = UrlFetchApp.fetch(url, {
-    method: 'post',
-    headers: buildHeaders(),
-    contentType: 'application/json',
+  const pmtMap = getPaymentMethodMap_();
+  Logger.log('pmtMap: ' + JSON.stringify(pmtMap));
+  const pmtInfo = pmtMap[CONFIG.PMT_TRANSFER] || pmtMap[CONFIG.PMT_CASH];
+  if (!pmtInfo) { Logger.log('⚠️ ไม่พบ payment method — ตั้งค่าใน PEAK ก่อน'); return; }
+
+  const ref = 'DEBUG-PROD-' + Date.now();
+  const payload = buildAllinonePayload(invCode, contactUuid, payDate, amt, desc, pmtInfo.id, pmtInfo.code, ref);
+  Logger.log('Payload: ' + JSON.stringify(payload));
+
+  const res = UrlFetchApp.fetch(CONFIG.BASE_URL + '/receipts/allinone', {
+    method: 'post', headers: buildHeaders(), contentType: 'application/json',
     payload: JSON.stringify({ PeakReceipts: { receipts: [payload] } }),
     muteHttpExceptions: true,
   });
@@ -370,9 +401,6 @@ function debugPart1Row() {
 }
 
 // ─── Part 1 ส่วนเสริม: ค่าบริการเพิ่มเติม (อ่านจาก Sum sheet) ────────────────
-// ⚠️ Sum sheet มีแค่ col SERVICE_FEE (N, index 13) — ไม่มีช่อง DATE/DOC/TYPE
-//    → ใช้ วันที่ทำสัญญา (B) เป็น fallback date
-//    → เลขที่ PEAK เขียนไปคอลัมน์ใหม่ (ถัดจาก DUE_DATE) อัตโนมัติ
 
 function runPart1_ServiceFee(sheetName) {
   sheetName = sheetName || getCurrentSumSheetName();
@@ -382,7 +410,7 @@ function runPart1_ServiceFee(sheetName) {
 
   toast(`⏳ Part 1 ค่าบริการ — ${sheetName}`, 'FinFin');
 
-  const svcDocCol = ensureSvcFeeHeader_(sheet);  // column index (0-based) สำหรับ OUTPUT
+  const svcDocCol = ensureSvcFeeHeader_(sheet);
   const data = getSumData_(sheet);
 
   const eligible = [];
@@ -414,15 +442,27 @@ function runPart1_ServiceFee(sheetName) {
 
   eligible.sort((a, b) => compareDates(a.feeDate, b.feeDate));
 
+  // ดึง payment method ก่อนวนลูป
+  let pmtMapSvc = {};
+  try { pmtMapSvc = getPaymentMethodMap_(); } catch (e) { Logger.log('pmtMap error: ' + e.message); }
+  const pmtInfoSvc = pmtMapSvc[CONFIG.PMT_TRANSFER] || pmtMapSvc[CONFIG.PMT_CASH];
+
   let ok = 0, err = 0;
   for (const item of eligible) {
     writeSumCell_(sheet, item.rowIndex, svcDocCol, CONFIG.PROCESSING_MARKER);
     try {
+      const contactUuid = getContactId_(item.invCode);
+      if (!contactUuid) throw new Error('ไม่พบ contactId — รัน Sync Contacts ก่อน');
+      if (!pmtInfoSvc) throw new Error('ไม่พบ payment method ใน PEAK');
       const desc = `ค่าบริการเพิ่มเติม สัญญา ${item.invCode}`;
       const ref = buildReference(item.invCode, formatDateForAPI(item.feeDate), 'SVC');
-      const payload = buildAllinonePayload(item.invCode, item.feeDate, item.feeAmt, desc, CONFIG.PMT_TRANSFER, ref);
-      const res = callPeakAPI('post', '/Receipts/allinone', { peakReceipts: payload });
-      const docNo = [res.taxInvoiceCode, res.receiptCode].filter(Boolean).join(' / ');
+      const payload = buildAllinonePayload(
+        item.invCode, contactUuid, item.feeDate, item.feeAmt, desc,
+        pmtInfoSvc.id, pmtInfoSvc.code, ref,
+      );
+      const res = callPeakAPI('post', '/receipts/allinone', { PeakReceipts: { receipts: [payload] } });
+      const rec = (res.PeakReceipts && res.PeakReceipts.receipts && res.PeakReceipts.receipts[0]) || res;
+      const docNo = [rec.taxInvoiceCode || rec.code, rec.receiptCode].filter(Boolean).join(' / ');
       writeSumCell_(sheet, item.rowIndex, svcDocCol, docNo);
       logEntry('Part1-SVC', sheetName, item.rowIndex, item.invCode, 'SUCCESS', docNo);
       ok++;
@@ -442,9 +482,8 @@ function runPart1_ServiceFee(sheetName) {
 function ensureSvcFeeHeader_(sheet) {
   const headerRow = CONFIG.SUM_HEADER_ROW;
   const lastCol = sheet.getLastColumn();
-  const targetCol = CONFIG.COL.DUE_DATE + 1;  // R = หลัง Q (due_date)
+  const targetCol = CONFIG.COL.DUE_DATE + 1;
   if (lastCol >= targetCol + 1) {
-    // ตรวจว่ามี header "เลขที่ PEAK" แล้วไหม
     const existing = sheet.getRange(headerRow, targetCol + 1).getValue();
     if (!existing) sheet.getRange(headerRow, targetCol + 1).setValue('เลขที่ PEAK (ค่าบริการ)');
   } else {

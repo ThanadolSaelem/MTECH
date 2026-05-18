@@ -16,9 +16,9 @@ const CONFIG = {
   BASE_URL: 'http://peakengineapidev.azurewebsites.net/api/v1',  // UAT
 
   // ─── Account Codes (ยืนยันกับ FinFin ก่อน deploy) ────────────────────────
-  ACCOUNT_CODE_SALES: '410000',
+  ACCOUNT_CODE_SALES: '410101',      // ขาย (ยืนยันใน PEAK UAT แล้ว — 410000 ไม่มีในระบบ)
   ACCOUNT_CODE_LATE_FEE: '420000',
-  ACCOUNT_CODE_SERVICE_FEE: '410000',
+  ACCOUNT_CODE_SERVICE_FEE: '410101',
   ACCOUNT_CODE_AR: '110000',
 
   // ─── VAT / Payment Types ─────────────────────────────────────────────────
