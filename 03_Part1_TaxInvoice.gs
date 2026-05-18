@@ -414,6 +414,56 @@ function debugPart1Row() {
     Logger.log('HTTP D: ' + resD.getResponseCode());
     Logger.log('BODY D: ' + resD.getContentText());
   }
+
+  // ─── Step 6: POSTMAN-CORRECT format (istaxInvoice + payments + paymentMethodId) ──
+  Logger.log('─── Step 6: GET /paymentmethods เพื่อหา UUID ของ transfer ───');
+  let pmtUuid = null;
+  try {
+    const pmRes = callPeakAPI('get', '/paymentmethods', null, { page: 1 });
+    const pms = pmRes && pmRes.PeakPaymentMethods && pmRes.PeakPaymentMethods.paymentMethods;
+    Logger.log('PaymentMethods: ' + JSON.stringify(pms));
+    if (Array.isArray(pms) && pms.length > 0) {
+      const transfer = pms.find(p => p.type === 8) || pms.find(p => /transfer|โอน/i.test(p.name || '')) || pms[0];
+      pmtUuid = transfer && (transfer.id || transfer.paymentMethodId);
+      Logger.log('Selected paymentMethod: ' + JSON.stringify({ id: pmtUuid, name: transfer && transfer.name, type: transfer && transfer.type }));
+    }
+  } catch (e) {
+    Logger.log('GET /paymentmethods error: ' + e.message);
+  }
+
+  if (contactUuid && pmtUuid) {
+    const refE = 'DEBUG-E-' + invCode + '-' + Date.now();
+    const payloadE = {
+      code:          refE,
+      issuedDate:    formatDateForAPI(payDate),
+      dueDate:       formatDateForAPI(payDate),
+      contactId:     contactUuid,
+      istaxInvoice:  1,
+      remark:        desc,
+      products: [{
+        accountCode: CONFIG.ACCOUNT_CODE_SALES,
+        description: desc,
+        quantity:    1,
+        price:       amt,
+        vatType:     CONFIG.VAT_TYPE_7,
+      }],
+      paidPayments: {
+        paymentDate: formatDateForAPI(payDate),
+        payments: [{ paymentMethodId: pmtUuid, amount: amt }],
+      },
+    };
+    Logger.log('─── Step 6: POST allinone ด้วย Postman-correct format ───');
+    Logger.log('Payload E: ' + JSON.stringify(payloadE));
+    const resE = UrlFetchApp.fetch(CONFIG.BASE_URL + '/receipts/allinone', {
+      method: 'post', headers: buildHeaders(), contentType: 'application/json',
+      payload: JSON.stringify({ PeakReceipts: { receipts: [payloadE] } }),
+      muteHttpExceptions: true,
+    });
+    Logger.log('HTTP E: ' + resE.getResponseCode());
+    Logger.log('BODY E: ' + resE.getContentText());
+  } else {
+    Logger.log('⚠️ ข้าม Step 6: contactUuid=' + contactUuid + ', pmtUuid=' + pmtUuid);
+  }
 }
 
 // ─── Part 1 ส่วนเสริม: ค่าบริการเพิ่มเติม (อ่านจาก Sum sheet) ────────────────
