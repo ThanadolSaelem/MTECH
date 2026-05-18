@@ -384,6 +384,36 @@ function debugPart1Row() {
   } else {
     Logger.log('⚠️ ไม่มี contactUuid → ข้าม Step 3 (ต้อง POST /contacts/ ก่อน)');
   }
+
+  // ─── Step 4: wrapper format เดิม (lowercase + single object) ────────────
+  const refC = 'DEBUG-C-' + invCode + '-' + Date.now();
+  const payloadC = buildAllinonePayload(invCode, payDate, amt, desc, CONFIG.PMT_TRANSFER, refC);
+  Logger.log('─── Step 4: POST allinone ด้วย { peakReceipts: <single> } ───');
+  Logger.log('Payload C: ' + JSON.stringify(payloadC));
+  const resC = UrlFetchApp.fetch(CONFIG.BASE_URL + '/receipts/allinone', {
+    method: 'post', headers: buildHeaders(), contentType: 'application/json',
+    payload: JSON.stringify({ peakReceipts: payloadC }),
+    muteHttpExceptions: true,
+  });
+  Logger.log('HTTP C: ' + resC.getResponseCode());
+  Logger.log('BODY C: ' + resC.getContentText());
+
+  // ─── Step 5: nested contact object ─────────────────────────────────────
+  if (contactUuid) {
+    const refD = 'DEBUG-D-' + invCode + '-' + Date.now();
+    const payloadD = buildAllinonePayload(invCode, payDate, amt, desc, CONFIG.PMT_TRANSFER, refD);
+    delete payloadD.contactCode;
+    payloadD.contact = { id: contactUuid, code: invCode };
+    Logger.log('─── Step 5: POST allinone ด้วย nested contact{id,code} ───');
+    Logger.log('Payload D: ' + JSON.stringify(payloadD));
+    const resD = UrlFetchApp.fetch(CONFIG.BASE_URL + '/receipts/allinone', {
+      method: 'post', headers: buildHeaders(), contentType: 'application/json',
+      payload: JSON.stringify({ PeakReceipts: { receipts: [payloadD] } }),
+      muteHttpExceptions: true,
+    });
+    Logger.log('HTTP D: ' + resD.getResponseCode());
+    Logger.log('BODY D: ' + resD.getContentText());
+  }
 }
 
 // ─── Part 1 ส่วนเสริม: ค่าบริการเพิ่มเติม (อ่านจาก Sum sheet) ────────────────
