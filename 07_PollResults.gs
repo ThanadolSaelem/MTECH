@@ -61,6 +61,12 @@ function pollQueueType_(queueType) {
       }
     } catch (e) {
       Logger.log(`Poll error for queue ${entry.queueId}: ${e.message}`);
+      // HTTP 400 = permanent failure (bad request, limit exceeded, etc.) → ลบทิ้ง
+      if (e.message.includes('400') || e.message.includes('Transaction Limit')) {
+        logEntry(queueType.toUpperCase(), entry.sheetName, -1, 'BATCH', 'ERROR',
+          entry.queueId, `Queue ถูกยกเลิก (permanent): ${e.message}`);
+        deleteQueueEntry(entry.key);
+      }
     }
   }
 }
