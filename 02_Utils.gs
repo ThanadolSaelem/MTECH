@@ -490,6 +490,45 @@ function clearAllQueueEntries() {
   return removed;
 }
 
+// ─── Duplicate Recovery Helpers ──────────────────────────────────────────────
+
+/**
+ * ตรวจว่า error เป็น "Transaction number is duplicated" (PEAK error 315)
+ */
+function isDuplicateCodeError_(e) {
+  const msg = (e && e.message) ? e.message : String(e);
+  return msg.includes('315') || msg.toLowerCase().includes('duplicat');
+}
+
+/**
+ * พยายามดึงเลขที่เอกสารจาก PEAK ด้วย GET /{endpoint}?code={code}
+ * ใช้เมื่อได้รับ error 315 เพื่อ recover เลขที่เอกสารที่สร้างไปแล้ว
+ * @param {string} endpoint  เช่น '/receipts', '/invoices'
+ * @param {string} code  document code (buildReference result)
+ * @returns {string|null}  doc number หรือ null ถ้าหาไม่เจอ
+ */
+function tryRecoverPeakDoc_(endpoint, code) {
+  try {
+    const res = callPeakAPI('get', endpoint, null, { code });
+    // ลอง extract จากหลาย response shape
+    const items = (res.PeakReceipts && res.PeakReceipts.receipts)
+               || (res.PeakInvoices && res.PeakInvoices.invoices)
+               || (res.data && Array.isArray(res.data) ? res.data : null)
+               || (Array.isArray(res) ? res : null);
+    if (Array.isArray(items) && items.length > 0) {
+      const doc = items[0];
+      return doc.receiptCode || doc.taxInvoiceCode || doc.invoiceCode || doc.code || null;
+    }
+    // Single-object response
+    if (res && (res.receiptCode || res.taxInvoiceCode || res.invoiceCode || res.code)) {
+      return res.receiptCode || res.taxInvoiceCode || res.invoiceCode || res.code;
+    }
+  } catch (e) {
+    Logger.log(`tryRecoverPeakDoc_ ${endpoint}?code=${code}: ${e.message}`);
+  }
+  return null;
+}
+
 // ─── Invoice Payload Helpers ──────────────────────────────────────────────────
 
 /**

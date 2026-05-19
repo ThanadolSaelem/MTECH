@@ -143,6 +143,7 @@ const CONFIG = {
   BATCH_SIZE: 50,
   STATUS_PAID: ['จ่ายแล้ว', 'ปิดยอด'],
   PROCESSING_MARKER: 'PROCESSING',
+  DUPLICATE_MARKER:  '[IN-PEAK]',   // เอกสารมีใน PEAK แล้วแต่ไม่รู้เลขที่ — ให้ user ค้นหาเอง
 
   // ─── Dashboard ────────────────────────────────────────────────────────────
   DASHBOARD_SHEET_NAME: 'DASHBOARD',
