@@ -20,6 +20,7 @@
  */
 
 function runPart3_LateFee(statementSheetName) {
+  preFlightChecks_();
   statementSheetName = statementSheetName || getCurrentStatementSheetName();
 
   const ss = SpreadsheetApp.openById(getSpreadsheetId());
@@ -77,6 +78,13 @@ function runPart3_LateFee(statementSheetName) {
 
   eligible.sort((a, b) => a.feeDate.getTime() - b.feeDate.getTime());
 
+  // ─── Fetch payment method once ─────────────────────────────────────────────
+  const pmtMap = getPaymentMethodMap_();
+  const pmtInfo = pmtMap[CONFIG.PMT_TRANSFER] || pmtMap[CONFIG.PMT_CASH];
+  if (!pmtInfo) {
+    throw new Error('ไม่พบ payment method ใน PEAK — ตั้งค่า "โอนเงิน" หรือ "เงินสด" ใน PEAK ก่อน');
+  }
+
   const batch = [];
   let countOk = 0;
 
@@ -85,13 +93,13 @@ function runPart3_LateFee(statementSheetName) {
     batch.push(item);
 
     if (batch.length >= CONFIG.BATCH_SIZE) {
-      const { ok, err } = submitLateFeesBatch_(sheet, batch, statementSheetName, feeDocCol, headerRow);
+      const { ok, err } = submitLateFeesBatch_(sheet, batch, statementSheetName, feeDocCol, headerRow, pmtInfo);
       countOk += ok; countError += err;
       batch.length = 0;
     }
   }
   if (batch.length > 0) {
-    const { ok, err } = submitLateFeesBatch_(sheet, batch, statementSheetName, feeDocCol, headerRow);
+    const { ok, err } = submitLateFeesBatch_(sheet, batch, statementSheetName, feeDocCol, headerRow, pmtInfo);
     countOk += ok; countError += err;
   }
 
@@ -103,10 +111,26 @@ function runPart3_LateFee(statementSheetName) {
 
 // ─── Submit Batch ─────────────────────────────────────────────────────────────
 
-function submitLateFeesBatch_(sheet, batch, sheetName, feeDocCol, headerRow) {
+function submitLateFeesBatch_(sheet, batch, sheetName, feeDocCol, headerRow, pmtInfo) {
   try {
-    const payloads = batch.map(buildLateFeePayload);
-    const res = callPeakAPI('post', '/Receipts/queue', { peakReceipts: payloads });
+    // ensure contacts synced + resolve UUIDs ก่อน build payloads
+    const codeNameMap = {};
+    batch.forEach(item => { codeNameMap[item.invCode] = item.invCode; });
+    ensureContactsBatch_(codeNameMap);
+
+    const payloads = [];
+    for (const item of batch) {
+      const contactUuid = getContactId_(item.invCode);
+      if (!contactUuid) {
+        writeStatementCell_(sheet, item.rowIndex, feeDocCol, headerRow, '');
+        logEntry('Part3', sheetName, item.rowIndex, item.invCode, 'SKIP', '', 'ไม่พบ contactId');
+        continue;
+      }
+      payloads.push(buildLateFeePayload(item, contactUuid, pmtInfo));
+    }
+    if (payloads.length === 0) return { ok: 0, err: 0 };
+
+    const res = callPeakAPI('post', '/receipts/queue', { PeakReceipts: { receipts: payloads } });
     const queueId = res.queueId || res.id || 'unknown';
 
     const meta = batch.map(item => ({
@@ -118,8 +142,8 @@ function submitLateFeesBatch_(sheet, batch, sheetName, feeDocCol, headerRow) {
       headerOffset: headerRow,
     }));
     saveQueueEntry('receipt_fee', queueId, sheetName, meta);
-    logEntry('Part3', sheetName, -1, 'BATCH', 'QUEUED', queueId, `ค่าปรับ ${batch.length} รายการ`);
-    return { ok: batch.length, err: 0 };
+    logEntry('Part3', sheetName, -1, 'BATCH', 'QUEUED', queueId, `ค่าปรับ ${payloads.length} รายการ`);
+    return { ok: payloads.length, err: 0 };
   } catch (e) {
     batch.forEach(item =>
       writeStatementCell_(sheet, item.rowIndex, feeDocCol, headerRow, '')
@@ -131,7 +155,7 @@ function submitLateFeesBatch_(sheet, batch, sheetName, feeDocCol, headerRow) {
 
 // ─── Payload Builder ──────────────────────────────────────────────────────────
 
-function buildLateFeePayload(item) {
+function buildLateFeePayload(item, contactUuid, pmtInfo) {
   const { invCode, lateFee, feeDate, instType } = item;
   const installNum = parseInstallmentNumber(instType);
   const desc = installNum
@@ -139,11 +163,12 @@ function buildLateFeePayload(item) {
     : `ค่าปรับ สัญญา ${invCode}`;
 
   return {
-    reference:    buildReference(invCode, instType || 'FEE', 'FEE'),
+    code:         buildReference(invCode, instType || 'FEE', 'FEE'),
     issuedDate:   formatDateForAPI(feeDate),
-    contactCode:  invCode,
-    isTaxInvoice: false,
-    note:         desc,
+    dueDate:      formatDateForAPI(feeDate),
+    contact:      { id: contactUuid, code: String(invCode) },
+    istaxInvoice: 0,
+    remark:       desc,
     products: [{
       accountCode: CONFIG.ACCOUNT_CODE_LATE_FEE,
       description: desc,
@@ -151,10 +176,13 @@ function buildLateFeePayload(item) {
       price:       lateFee,
       vatType:     CONFIG.VAT_TYPE_NONE,
     }],
-    paymentMethods: [{
-      type:   CONFIG.PMT_TRANSFER,
-      amount: lateFee,
-    }],
+    paidPayments: {
+      paymentDate: formatDateForAPI(feeDate),
+      payments:    [{
+        paymentMethod: { id: pmtInfo.id, code: pmtInfo.code },
+        amount:        lateFee,
+      }],
+    },
   };
 }
 

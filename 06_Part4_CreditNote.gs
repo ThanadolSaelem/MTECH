@@ -24,6 +24,7 @@
  * รันออกใบลดหนี้จากไฟล์รับคืน
  */
 function runPart4_CreditNote() {
+  preFlightChecks_();
   let ss, sheet;
 
   // ─── เปิดไฟล์รับคืน ───────────────────────────────────────────────────────
@@ -97,11 +98,17 @@ function runPart4_CreditNote() {
     writeCell(sheet, i, CONFIG.RETURN_COL.Q, CONFIG.PROCESSING_MARKER);
 
     try {
+      // ensure contact exists + resolve UUID (Part 1 format: contact:{id,code})
+      ensureContactsBatch_({ [invCode]: customerName });
+      const contactUuid = getContactId_(invCode);
+      if (!contactUuid) throw new Error('ไม่พบ contactId — รัน Sync Contacts ก่อน');
+
       const payload = buildCreditNotePayload(
-        invCode, returnDate, creditAmt, productModel, imei, customerName, branch
+        invCode, contactUuid, returnDate, creditAmt, productModel, imei, customerName, branch
       );
-      const res = callPeakAPI('post', '/CreditNotes', { peakCreditNotes: payload });
-      const docNo = res.creditNoteCode || res.code || JSON.stringify(res);
+      const res = callPeakAPI('post', '/creditnotes', { PeakCreditNotes: { creditNotes: [payload] } });
+      const cn = (res.PeakCreditNotes && res.PeakCreditNotes.creditNotes && res.PeakCreditNotes.creditNotes[0]) || res;
+      const docNo = cn.creditNoteCode || cn.code || JSON.stringify(res).substring(0, 80);
 
       writeCell(sheet, i, CONFIG.RETURN_COL.Q, docNo);
       logEntry('Part4', CONFIG.RETURN_SHEET_NAME, i, invCode, 'SUCCESS', docNo);
@@ -125,14 +132,15 @@ function runPart4_CreditNote() {
 /**
  * สร้าง payload ใบลดหนี้
  */
-function buildCreditNotePayload(invCode, returnDate, creditAmt, product, imei, customerName, branch) {
+function buildCreditNotePayload(invCode, contactUuid, returnDate, creditAmt, product, imei, customerName, branch) {
   const desc = `คืนเครื่อง ${product}${imei ? ` IMEI ${imei}` : ''} สาขา ${branch} — ${customerName}`;
 
   return {
-    reference: buildReference(invCode, formatDateForAPI(returnDate), 'CN'),
-    issuedDate: formatDateForAPI(returnDate),
-    contactCode: invCode,
-    note: desc,
+    code:        buildReference(invCode, formatDateForAPI(returnDate), 'CN'),
+    issuedDate:  formatDateForAPI(returnDate),
+    contact:     { id: contactUuid, code: String(invCode) },
+    taxStatus:   1,
+    remark:      desc,
     products: [
       {
         accountCode: CONFIG.ACCOUNT_CODE_SALES,

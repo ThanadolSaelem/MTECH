@@ -16,9 +16,9 @@ const CONFIG = {
   BASE_URL: 'http://peakengineapidev.azurewebsites.net/api/v1',  // UAT
 
   // ─── Account Codes (ยืนยันกับ FinFin ก่อน deploy) ────────────────────────
-  ACCOUNT_CODE_SALES: '410000',
+  ACCOUNT_CODE_SALES: '410101',      // ขาย (ยืนยันใน PEAK UAT แล้ว — 410000 ไม่มีในระบบ)
   ACCOUNT_CODE_LATE_FEE: '420000',
-  ACCOUNT_CODE_SERVICE_FEE: '410000',
+  ACCOUNT_CODE_SERVICE_FEE: '410101',
   ACCOUNT_CODE_AR: '110000',
 
   // ─── VAT / Payment Types ─────────────────────────────────────────────────
@@ -143,6 +143,7 @@ const CONFIG = {
   BATCH_SIZE: 50,
   STATUS_PAID: ['จ่ายแล้ว', 'ปิดยอด'],
   PROCESSING_MARKER: 'PROCESSING',
+  DUPLICATE_MARKER:  '[IN-PEAK]',   // เอกสารมีใน PEAK แล้วแต่ไม่รู้เลขที่ — ให้ user ค้นหาเอง
 
   // ─── Dashboard ────────────────────────────────────────────────────────────
   DASHBOARD_SHEET_NAME: 'DASHBOARD',

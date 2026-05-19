@@ -404,6 +404,131 @@ function deleteQueueEntry(key) {
   PropertiesService.getScriptProperties().deleteProperty(key);
 }
 
+// ─── ScriptProperties Diagnostics & Cleanup ──────────────────────────────────
+
+/**
+ * แสดงขนาดของ ScriptProperties แต่ละ key (KB)
+ * รันใน Apps Script editor เพื่อดูว่าอะไรกินที่
+ */
+function inspectScriptProperties() {
+  const props = PropertiesService.getScriptProperties().getProperties();
+  const entries = Object.entries(props).map(([k, v]) => ({
+    key: k,
+    sizeKB: (v.length / 1024).toFixed(2),
+  }));
+  entries.sort((a, b) => Number(b.sizeKB) - Number(a.sizeKB));
+  const total = entries.reduce((s, e) => s + Number(e.sizeKB), 0);
+  Logger.log(`Total: ${total.toFixed(2)} KB / 500 KB (${(total / 5).toFixed(1)}%)`);
+  entries.slice(0, 30).forEach(e => Logger.log(`${e.sizeKB.padStart(8)} KB  ${e.key}`));
+  if (entries.length > 30) Logger.log(`... and ${entries.length - 30} more`);
+}
+
+/**
+ * ลบ queue entries เก่ากว่า N ชั่วโมง (default 24h)
+ */
+function cleanupStaleQueueEntries(maxAgeHours) {
+  maxAgeHours = maxAgeHours || 24;
+  const cutoff = Date.now() - maxAgeHours * 3600000;
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+  let removed = 0;
+  for (const [k, v] of Object.entries(all)) {
+    if (!k.startsWith('QUEUE_')) continue;
+    try {
+      const obj = JSON.parse(v);
+      if (Number(obj.savedAt || 0) < cutoff) {
+        props.deleteProperty(k);
+        removed++;
+      }
+    } catch (e) {
+      props.deleteProperty(k);
+      removed++;
+    }
+  }
+  Logger.log(`Cleaned ${removed} stale queue entries (>${maxAgeHours}h old)`);
+  return removed;
+}
+
+/**
+ * Pre-flight checks — เรียกตอนเริ่มทุก Part runner
+ *   1. ลบ queue เก่ากว่า 24 ชม. อัตโนมัติ
+ *   2. เตือนถ้า ScriptProperties usage > 80%
+ *   3. Throw ถ้า > 95% (รันต่อไม่ได้แน่ — บอกให้ user ล้างก่อน)
+ */
+function preFlightChecks_() {
+  const cleaned = cleanupStaleQueueEntries(24);
+  if (cleaned > 0) Logger.log(`Pre-flight: cleaned ${cleaned} stale queue entries`);
+
+  const props = PropertiesService.getScriptProperties().getProperties();
+  const totalBytes = Object.values(props).reduce((s, v) => s + v.length, 0);
+  const usagePct = (totalBytes / (500 * 1024)) * 100;
+
+  if (usagePct > 95) {
+    throw new Error(`ScriptProperties เต็ม (${usagePct.toFixed(1)}%) — รัน clearAllQueueEntries() แล้วลองใหม่`);
+  }
+  if (usagePct > 80) {
+    const msg = `⚠️ ScriptProperties ${usagePct.toFixed(1)}% — รัน inspectScriptProperties() เพื่อตรวจ`;
+    Logger.log(msg);
+    toast(msg, 'FinFin', 10);
+  }
+}
+
+/**
+ * ลบ queue entries ทั้งหมด (nuclear option ถ้า quota เต็ม)
+ */
+function clearAllQueueEntries() {
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+  let removed = 0;
+  for (const k of Object.keys(all)) {
+    if (k.startsWith('QUEUE_')) {
+      props.deleteProperty(k);
+      removed++;
+    }
+  }
+  Logger.log(`Cleared ${removed} queue entries`);
+  return removed;
+}
+
+// ─── Duplicate Recovery Helpers ──────────────────────────────────────────────
+
+/**
+ * ตรวจว่า error เป็น "Transaction number is duplicated" (PEAK error 315)
+ */
+function isDuplicateCodeError_(e) {
+  const msg = (e && e.message) ? e.message : String(e);
+  return msg.includes('315') || msg.toLowerCase().includes('duplicat');
+}
+
+/**
+ * พยายามดึงเลขที่เอกสารจาก PEAK ด้วย GET /{endpoint}?code={code}
+ * ใช้เมื่อได้รับ error 315 เพื่อ recover เลขที่เอกสารที่สร้างไปแล้ว
+ * @param {string} endpoint  เช่น '/receipts', '/invoices'
+ * @param {string} code  document code (buildReference result)
+ * @returns {string|null}  doc number หรือ null ถ้าหาไม่เจอ
+ */
+function tryRecoverPeakDoc_(endpoint, code) {
+  try {
+    const res = callPeakAPI('get', endpoint, null, { code });
+    // ลอง extract จากหลาย response shape
+    const items = (res.PeakReceipts && res.PeakReceipts.receipts)
+               || (res.PeakInvoices && res.PeakInvoices.invoices)
+               || (res.data && Array.isArray(res.data) ? res.data : null)
+               || (Array.isArray(res) ? res : null);
+    if (Array.isArray(items) && items.length > 0) {
+      const doc = items[0];
+      return doc.receiptCode || doc.taxInvoiceCode || doc.invoiceCode || doc.code || null;
+    }
+    // Single-object response
+    if (res && (res.receiptCode || res.taxInvoiceCode || res.invoiceCode || res.code)) {
+      return res.receiptCode || res.taxInvoiceCode || res.invoiceCode || res.code;
+    }
+  } catch (e) {
+    Logger.log(`tryRecoverPeakDoc_ ${endpoint}?code=${code}: ${e.message}`);
+  }
+  return null;
+}
+
 // ─── Invoice Payload Helpers ──────────────────────────────────────────────────
 
 /**

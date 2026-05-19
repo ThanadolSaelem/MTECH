@@ -8,11 +8,7 @@
  *  4. แนบ headers ทุก request: Time-Stamp, Time-Signature, Client-Token, User-Token
  */
 
-// ─── Time-Stamp ─────────────────────────────────────────────────────────────
-/**
- * สร้าง timestamp ในรูปแบบ yyyyMMddHHmmss (UTC — ตาม PEAK server)
- * @returns {string}
- */
+// ─── Time-Stamp ──────────────────────────────────────────────────────────────
 function buildTimeStamp() {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
@@ -27,13 +23,6 @@ function buildTimeStamp() {
 }
 
 // ─── HMAC-SHA1 Signature ─────────────────────────────────────────────────────
-/**
- * คำนวณ HMAC-SHA1(message, key) → lowercase hex string
- * ใช้ GAS built-in Utilities.computeHmacSignature
- * @param {string} message
- * @param {string} key
- * @returns {string}
- */
 function hmacSha1Hex(message, key) {
   const bytes = Utilities.computeHmacSignature(
     Utilities.MacAlgorithm.HMAC_SHA_1,
@@ -43,12 +32,7 @@ function hmacSha1Hex(message, key) {
   return bytes.map(b => ('0' + (b & 0xff).toString(16)).slice(-2)).join('');
 }
 
-// ─── Client Token (cached 23 ชม.) ────────────────────────────────────────────
-/**
- * ดึง Client-Token จาก cache ใน ScriptProperties
- * ถ้าหมดอายุหรือยังไม่มี → เรียก /ClientToken ใหม่
- * @returns {string} client token
- */
+// ─── Client Token (cached 23 ชม.) ───────────────────────────────────────────────
 function getClientToken() {
   const props = PropertiesService.getScriptProperties();
   const cached = props.getProperty('PEAK_CLIENT_TOKEN');
@@ -57,12 +41,10 @@ function getClientToken() {
   if (cached && cachedAt) {
     const age = Date.now() - Number(cachedAt);
     if (age < 23 * 60 * 60 * 1000) {
-      // ยังใช้ได้อยู่ (< 23 ชม.)
       return cached;
     }
   }
 
-  // ต้องขอใหม่
   const ts = buildTimeStamp();
   const sig = hmacSha1Hex(ts, CONFIG.CONNECT_ID);
 
@@ -97,18 +79,13 @@ function getClientToken() {
   return token;
 }
 
-// ─── Build Request Headers ────────────────────────────────────────────────────
-/**
- * สร้าง headers สำหรับทุก PEAK API call
- * @returns {Object}
- */
+// ─── Build Request Headers ────────────────────────────────────────────────
 function buildHeaders() {
   const ts = buildTimeStamp();
   const sig = hmacSha1Hex(ts, CONFIG.CONNECT_ID);
   const clientToken = getClientToken();
 
   // Content-Type ไม่ใส่ที่นี่ — ให้ callPeakAPI ตั้งผ่าน options.contentType แยก
-  // เพื่อป้องกัน duplicate header ที่บาง server ปฏิเสธ
   return {
     'Time-Stamp': ts,
     'Time-Signature': sig,
@@ -117,15 +94,7 @@ function buildHeaders() {
   };
 }
 
-// ─── Generic API Caller ───────────────────────────────────────────────────────
-/**
- * เรียก PEAK API พร้อม headers อัตโนมัติ
- * @param {string} method  'get' | 'post'
- * @param {string} path    เช่น '/Receipts/queue'
- * @param {Object} [payload]
- * @param {Object} [params]  query string params
- * @returns {Object} parsed JSON response
- */
+// ─── Generic API Caller ─────────────────────────────────────────────────────
 function callPeakAPI(method, path, payload, params) {
   let url = CONFIG.BASE_URL + path;
 
@@ -158,23 +127,18 @@ function callPeakAPI(method, path, payload, params) {
     data = { raw: text };
   }
 
-  // HTTP-level error
   if (code !== 200) {
     throw new Error(`PEAK API ${method.toUpperCase()} ${path} → HTTP ${code}: ${text}`);
   }
 
-  // PEAK returns HTTP 200 even for application-level errors
-  // ตรวจ top-level error flags
   if (data && (data.isSuccess === false || data.success === false)) {
     const errMsg = data.message || data.errorMessage || data.error || text;
     throw new Error(`PEAK API error: ${errMsg}`);
   }
 
-  // ตรวจ resCode ใน nested object (เช่น PeakReceipts.receipts[0].resCode = "400")
   const topKey = data && Object.keys(data)[0];
   if (topKey && data[topKey]) {
     const inner = data[topKey];
-    // array case: receipts[0].resCode
     const firstItem = Array.isArray(inner.receipts)   ? inner.receipts[0]
                     : Array.isArray(inner.invoices)   ? inner.invoices[0]
                     : Array.isArray(inner.creditNotes) ? inner.creditNotes[0]
@@ -189,10 +153,6 @@ function callPeakAPI(method, path, payload, params) {
   return data;
 }
 
-/**
- * ทดสอบ receipts/allinone กับ 1 row และ log response เต็มๆ
- * แก้ invCode/payDate/amount ตามข้อมูลจริงก่อนรัน
- */
 function debugAllinone() {
   const payload = {
     code:         'DEBUG-TEST-001',
@@ -224,9 +184,6 @@ function debugAllinone() {
   Logger.log('BODY: ' + res.getContentText());
 }
 
-/**
- * รีเซ็ต Client Token cache (ใช้เมื่อ token ผิดพลาด)
- */
 function resetClientTokenCache() {
   const props = PropertiesService.getScriptProperties();
   props.deleteProperty('PEAK_CLIENT_TOKEN');
@@ -234,10 +191,6 @@ function resetClientTokenCache() {
   Logger.log('Client Token cache cleared.');
 }
 
-/**
- * ดึงรายการ Payment Methods จาก PEAK และ log ออกมา
- * รัน function นี้จาก GAS editor เพื่อดู paymentMethodId ที่ถูกต้อง
- */
 function testGetPaymentMethods() {
   const data = callPeakAPI('get', '/paymentmethods', null, { page: 1 });
   Logger.log(JSON.stringify(data, null, 2));

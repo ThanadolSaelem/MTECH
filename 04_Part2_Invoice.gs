@@ -17,6 +17,7 @@
  */
 
 function runPart2_Invoice(sheetName) {
+  preFlightChecks_();
   sheetName = sheetName || getCurrentSumSheetName();
   const ss = SpreadsheetApp.openById(getSpreadsheetId());
   const sheet = ss.getSheetByName(sheetName);
@@ -62,12 +63,18 @@ function runPart2_Invoice(sheetName) {
     writeSumCell_(sheet, i, invDocCol, CONFIG.PROCESSING_MARKER);
 
     try {
+      // ensure contact exists + resolve UUID (Part 1 format: contact:{id,code})
+      ensureContactsBatch_({ [invCode]: customerName });
+      const contactUuid = getContactId_(invCode);
+      if (!contactUuid) throw new Error('ไม่พบ contactId — รัน Sync Contacts ก่อน');
+
       const payload = buildInvoiceAllInOnePayload(
-        invCode, contractDate, downPayment, installmentAmt,
+        invCode, contactUuid, contractDate, downPayment, installmentAmt,
         numInstallments, contractAmt, dueDates, customerName
       );
-      const res = callPeakAPI('post', '/Invoices/allinone', { peakInvoices: payload });
-      const docNo = res.invoiceCode || res.code || JSON.stringify(res).substring(0, 80);
+      const res = callPeakAPI('post', '/invoices/allinone', { PeakInvoices: { invoices: [payload] } });
+      const inv = (res.PeakInvoices && res.PeakInvoices.invoices && res.PeakInvoices.invoices[0]) || res;
+      const docNo = inv.invoiceCode || inv.code || JSON.stringify(res).substring(0, 80);
       writeSumCell_(sheet, i, invDocCol, docNo);
       logEntry('Part2', sheetName, i, invCode, 'SUCCESS', docNo);
       countOk++;
@@ -87,7 +94,7 @@ function runPart2_Invoice(sheetName) {
 // ─── Payload Builder ──────────────────────────────────────────────────────────
 
 function buildInvoiceAllInOnePayload(
-  invCode, contractDate, downPayment, installmentAmt,
+  invCode, contactUuid, contractDate, downPayment, installmentAmt,
   numInstallments, contractAmt, dueDates, customerName
 ) {
   const products = [];
@@ -116,11 +123,13 @@ function buildInvoiceAllInOnePayload(
   }
 
   return {
-    reference:   buildReference(invCode, 'ALL', 'INV'),
-    issuedDate:  formatDateForAPI(contractDate),
-    dueDate:     formatDateForAPI(dueDates[dueDates.length - 1] || contractDate),
-    contactCode: invCode,
-    note:        `ใบแจ้งหนี้ สัญญา ${invCode}${customerName ? ` — ${customerName}` : ''}`,
+    code:         buildReference(invCode, 'ALL', 'INV'),
+    issuedDate:   formatDateForAPI(contractDate),
+    dueDate:      formatDateForAPI(dueDates[dueDates.length - 1] || contractDate),
+    contact:      { id: contactUuid, code: String(invCode) },
+    istaxInvoice: 1,
+    taxStatus:    1,
+    remark:       `ใบแจ้งหนี้ สัญญา ${invCode}${customerName ? ` — ${customerName}` : ''}`,
     products,
   };
 }
