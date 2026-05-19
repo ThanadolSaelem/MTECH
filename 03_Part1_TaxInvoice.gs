@@ -175,9 +175,24 @@ function runPart1_TaxInvoice(sheetName) {
       logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'SUCCESS', docNo, 'Case A');
       countA++;
     } catch (e) {
-      writeReceiptCell_(sheet, item.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, '');
-      logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'ERROR', '', e.message);
-      countError++;
+      if (isDuplicateCodeError_(e)) {
+        // Doc already exists in PEAK from a previous run — try to recover doc number
+        const recovered = tryRecoverPeakDoc_('/receipts', item.ref);
+        if (recovered) {
+          writeReceiptCell_(sheet, item.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, recovered);
+          logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'SUCCESS', recovered, 'Case A (recovered duplicate)');
+          countA++;
+        } else {
+          // Can't fetch number — mark so we stop retrying; user can fill manually
+          writeReceiptCell_(sheet, item.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, CONFIG.DUPLICATE_MARKER);
+          logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'WARN', CONFIG.DUPLICATE_MARKER,
+            'เอกสารมีใน PEAK แล้ว — ค้นหาเลขที่ใน PEAK แล้วอัปเดต Col PEAK_DOC ด้วยตนเอง');
+        }
+      } else {
+        writeReceiptCell_(sheet, item.rowIndex, CONFIG.RECEIPT_COL.PEAK_DOC, '');
+        logEntry('Part1', sheetName, item.rowIndex, item.invCode, 'ERROR', '', e.message);
+        countError++;
+      }
     }
   }
 
