@@ -30,7 +30,7 @@ function pollQueueType_(queueType) {
 
   for (const entry of entries) {
     try {
-      const res = callPeakAPI('get', endpoint, null, { id: entry.queueId });
+      const res = callPeakAPI('get', endpoint, null, { queueId: entry.queueId });
       const status = (res.status || '').toLowerCase();
 
       if (status === 'processing' || status === 'pending' || status === '') {
