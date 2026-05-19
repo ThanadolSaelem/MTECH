@@ -20,6 +20,7 @@
  */
 
 function runPart3_LateFee(statementSheetName) {
+  preFlightChecks_();
   statementSheetName = statementSheetName || getCurrentStatementSheetName();
 
   const ss = SpreadsheetApp.openById(getSpreadsheetId());
