@@ -195,3 +195,90 @@ function testGetPaymentMethods() {
   const data = callPeakAPI('get', '/paymentmethods', null, { page: 1 });
   Logger.log(JSON.stringify(data, null, 2));
 }
+
+// ─── Sandbox Cleanup: ลอง DELETE/VOID เอกสารทีละใบ ──────────────────────────
+// ⚠️  ใช้เฉพาะใน UAT เท่านั้น ห้ามรันใน production
+// PEAK API อาจไม่รองรับ DELETE (กฎหมายไทย) — function นี้จะลองหลาย endpoint
+// ถ้าเจอ endpoint ที่ work → ใช้ cleanupTestDocs() ลบ bulk ได้
+
+function probeDeleteEndpoint(docCode) {
+  if (!docCode) {
+    Logger.log('Usage: probeDeleteEndpoint("IVF-260331001")');
+    return;
+  }
+
+  const candidates = [
+    { method: 'delete', path: `/receipts/${docCode}`,        params: null },
+    { method: 'delete', path: '/receipts',                   params: { code: docCode } },
+    { method: 'post',   path: `/receipts/${docCode}/void`,   params: null, payload: {} },
+    { method: 'post',   path: `/receipts/${docCode}/cancel`, params: null, payload: {} },
+    { method: 'post',   path: '/receipts/void',              params: null, payload: { code: docCode } },
+    { method: 'put',    path: `/receipts/${docCode}`,        params: null, payload: { status: 'cancelled' } },
+  ];
+
+  for (const c of candidates) {
+    try {
+      const url = CONFIG.BASE_URL + c.path + (c.params
+        ? '?' + Object.entries(c.params).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
+        : '');
+      const options = {
+        method: c.method,
+        headers: buildHeaders(),
+        muteHttpExceptions: true,
+      };
+      if (c.payload) {
+        options.contentType = 'application/json';
+        options.payload = JSON.stringify(c.payload);
+      }
+      const res = UrlFetchApp.fetch(url, options);
+      const code = res.getResponseCode();
+      const body = res.getContentText().slice(0, 200);
+      Logger.log(`${c.method.toUpperCase()} ${c.path} → HTTP ${code}: ${body}`);
+      if (code === 200) {
+        Logger.log(`✅ FOUND working endpoint: ${c.method.toUpperCase()} ${c.path}`);
+        return c;
+      }
+    } catch (e) {
+      Logger.log(`${c.method.toUpperCase()} ${c.path} → ERROR: ${e.message}`);
+    }
+  }
+  Logger.log('❌ ไม่มี endpoint ใดทำงาน — DELETE/VOID น่าจะไม่รองรับใน sandbox');
+  return null;
+}
+
+/**
+ * ⚠️  Sandbox cleanup: ลบ test documents ทั้งหมดจาก Log Sheet
+ * ต้องรัน probeDeleteEndpoint() ก่อนเพื่อหา endpoint ที่ใช้ได้
+ * แล้วเอามาใส่ใน workingEndpoint
+ */
+function cleanupTestDocs(workingEndpoint) {
+  if (!workingEndpoint) {
+    throw new Error('ต้องระบุ workingEndpoint จาก probeDeleteEndpoint() ก่อน เช่น { method:"delete", path:"/receipts/{code}" }');
+  }
+
+  const log = getLogSheet();
+  const data = log.getDataRange().getValues();
+  // คอลัมน์ใน Log: [Date, Part, Sheet, Row, INV, Status, DocNo, Msg]
+  const docs = data.slice(1)
+    .filter(r => String(r[5]).toUpperCase() === 'SUCCESS' && r[6])
+    .map(r => String(r[6]).split(' / ')[0].trim())
+    .filter(Boolean);
+
+  Logger.log(`พบ ${docs.length} เอกสารใน Log จะลอง void/delete`);
+  let ok = 0, err = 0;
+
+  for (const docCode of docs) {
+    try {
+      const path = workingEndpoint.path.replace('{code}', docCode);
+      const params = workingEndpoint.params
+        ? Object.fromEntries(Object.entries(workingEndpoint.params).map(([k, v]) => [k, v === '{code}' ? docCode : v]))
+        : null;
+      callPeakAPI(workingEndpoint.method, path, workingEndpoint.payload || null, params);
+      ok++;
+    } catch (e) {
+      Logger.log(`Failed ${docCode}: ${e.message}`);
+      err++;
+    }
+  }
+  Logger.log(`Cleanup เสร็จ — สำเร็จ: ${ok}, ล้มเหลว: ${err}`);
+}
