@@ -15,8 +15,8 @@
 // ─── Main Poll Function (เรียกจาก Trigger) ───────────────────────────────────
 
 function pollAllQueues() {
-  pollQueueType_('invoice');
-  pollQueueType_('receipt');
+  if (pollQueueType_('invoice') === 'quota') return;
+  if (pollQueueType_('receipt') === 'quota') return;
   pollQueueType_('receipt_fee');
 }
 
@@ -61,12 +61,23 @@ function pollQueueType_(queueType) {
       }
     } catch (e) {
       Logger.log(`Poll error for queue ${entry.queueId}: ${e.message}`);
-      // HTTP 400 = permanent failure (bad request, limit exceeded, etc.) → ลบทิ้ง
-      if (e.message.includes('400') || e.message.includes('Transaction Limit')) {
-        logEntry(queueType.toUpperCase(), entry.sheetName, -1, 'BATCH', 'ERROR',
-          entry.queueId, `Queue ถูกยกเลิก (permanent): ${e.message}`);
-        deleteQueueEntry(entry.key);
+      const kind = classifyError_(e);
+      if (kind === 'quota') {
+        // โควตา PEAK หมดชั่วคราว (UAT Transaction Limit / rate limit 429)
+        // ห้ามลบ queue ทิ้ง — เอกสารยังไม่ถูกสร้าง เก็บไว้ poll รอบหน้า
+        logEntry(queueType.toUpperCase(), entry.sheetName, -1, 'BATCH', 'WARN',
+          entry.queueId, `Poll หยุดชั่วคราว (quota): ${e.message}`);
+        return 'quota';  // หยุด poll type นี้ — queue ที่เหลือจะเจอ error เดียวกัน
       }
+      if (kind === 'transient') {
+        // network / 5xx ชั่วคราว — เก็บ queue ไว้ retry รอบหน้า
+        Logger.log(`Queue ${entry.queueId} transient error, จะ retry`);
+        continue;
+      }
+      // permanent (400 bad data ฯลฯ) → ลบทิ้ง
+      logEntry(queueType.toUpperCase(), entry.sheetName, -1, 'BATCH', 'ERROR',
+        entry.queueId, `Queue ถูกยกเลิก (permanent): ${e.message}`);
+      deleteQueueEntry(entry.key);
     }
   }
 }
