@@ -162,6 +162,7 @@ class MTechApp(ctk.CTk):
         self._build_ui()
         self._show_page("dashboard" if self.cfg["gas_url"] else "settings")
         self.after(400, self._check_conn)
+        self.after(1500, self._notif_auto)
 
     # ── Scaffold ──────────────────────────────────────────────────────────────
 
@@ -207,10 +208,11 @@ class MTechApp(ctk.CTk):
 
         # ── Nav items ─────────────────────────────────────────────────────────
         nav_items = [
-            ("dashboard", "Dashboard"),
-            ("tasks",     "Tasks"),
-            ("settings",  "Settings"),
-            ("logs",      "Logs"),
+            ("dashboard",     "Dashboard"),
+            ("tasks",         "Tasks"),
+            ("notifications", "แจ้งเตือน"),
+            ("settings",      "Settings"),
+            ("logs",          "Logs"),
         ]
         for i, (key, label) in enumerate(nav_items):
             y   = NAV_Y0 + i * NAV_DY
@@ -238,6 +240,16 @@ class MTechApp(ctk.CTk):
                              width=200, height=36)
             self.nav_btns[key] = btn
 
+        # ── Notification badge (on the "แจ้งเตือน" nav row) ───────────────────
+        notif_idx = next(i for i, (k, _) in enumerate(nav_items)
+                         if k == "notifications")
+        badge_y = NAV_Y0 + notif_idx * NAV_DY + 21
+        self._notif_badge = tk.Label(sb, text="", font=(FONT, 9, "bold"),
+                                     bg=DANGER, fg=WHITE, padx=6, pady=1, bd=0)
+        # created after the nav buttons → renders above the button window
+        self._notif_badge_win = sb.create_window(
+            198, badge_y, window=self._notif_badge, anchor="e", state="hidden")
+
         # ── Status dot ────────────────────────────────────────────────────────
         sbg = _lerp_hex(690, 720)
         self.status_dot = tk.Label(sb, text="● ตรวจสอบ…",
@@ -250,10 +262,11 @@ class MTechApp(ctk.CTk):
         self.content.grid(row=0, column=1, sticky="nsew")
 
         self.pages = {
-            "dashboard": self._build_dashboard(),
-            "tasks":     self._build_tasks(),
-            "settings":  self._build_settings(),
-            "logs":      self._build_logs(),
+            "dashboard":     self._build_dashboard(),
+            "tasks":         self._build_tasks(),
+            "notifications": self._build_notifications(),
+            "settings":      self._build_settings(),
+            "logs":          self._build_logs(),
         }
 
     def _show_page(self, key: str) -> None:
@@ -272,6 +285,8 @@ class MTechApp(ctk.CTk):
                     fill=WHITE if active else "")
         if key == "dashboard":
             self._refresh_dash()
+        elif key == "notifications":
+            self._load_notifications()
 
     # ── Dashboard ─────────────────────────────────────────────────────────────
 
@@ -599,6 +614,152 @@ class MTechApp(ctk.CTk):
         self.logs_box.pack(fill="both", expand=True)
         return p
 
+    # ── Notifications ─────────────────────────────────────────────────────────
+
+    def _build_notifications(self) -> ctk.CTkFrame:
+        p = ctk.CTkFrame(self.content, fg_color="transparent")
+
+        hdr = ctk.CTkFrame(p, fg_color="transparent")
+        hdr.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(hdr, text="แจ้งเตือน", font=_F(32, True),
+                     text_color=TXT).pack(side="left")
+        ctk.CTkButton(hdr, text="Refresh", width=100,
+            fg_color=BLUE, hover_color=BLUE_HOVER,
+            text_color=WHITE, font=_F(13, True),
+            corner_radius=6, command=self._load_notifications,
+        ).pack(side="right")
+
+        self.notif_meta = ctk.CTkLabel(p, text="", anchor="w",
+                                       text_color=TXT3, font=_F(11))
+        self.notif_meta.pack(fill="x", pady=(0, 16))
+
+        self.notif_body = ctk.CTkScrollableFrame(
+            p, fg_color="transparent",
+            scrollbar_button_color=SURFACE2,
+            scrollbar_button_hover_color=BORDER)
+        self.notif_body.pack(fill="both", expand=True)
+        return p
+
+    def _load_notifications(self, silent: bool = False) -> None:
+        if not silent:
+            self.notif_meta.configure(text="กำลังโหลด…")
+
+        def _t():
+            try:
+                data = self.client.call("notifications/list", {}, timeout=60)
+                self.after(0, lambda: self._render_notifications(data))
+            except NoInternetError:
+                if not silent:
+                    self.after(0, self._show_offline)
+                    self.after(0, lambda: self.notif_meta.configure(text="Offline"))
+            except Exception as e:
+                msg = str(e)
+                if not silent:
+                    self.after(0, lambda: self.notif_meta.configure(text=msg))
+
+        threading.Thread(target=_t, daemon=True).start()
+
+    def _notif_auto(self) -> None:
+        """รีเฟรช badge เงียบๆ เป็นระยะ — ไม่เด้ง dialog ตอน offline"""
+        self._load_notifications(silent=True)
+        self.after(90_000, self._notif_auto)
+
+    def _render_notifications(self, data: dict) -> None:
+        for w in self.notif_body.winfo_children():
+            w.destroy()
+        self.notif_meta.configure(
+            text=f"อัปเดต  {data.get('generatedAt', '—')[:19].replace('T', '  ')}")
+
+        self._notif_section(
+            "Error ที่ต้องแก้", DANGER, data.get("errors", []),
+            lambda e: (
+                f"[{e.get('part', '?')}]  {e.get('sheet', '')}  "
+                f"แถว {e.get('row', '')}  ·  {e.get('inv', '')}",
+                e.get("msg", "")))
+
+        self._notif_section(
+            "งานที่ต้องลงมือ", WARNING, data.get("actions", []),
+            lambda a: (a.get("label", ""), a.get("detail", "")))
+
+        self._notif_section(
+            "งานค้าง — ระบบทำต่อให้เองอัตโนมัติ", BLUE, data.get("pending", []),
+            lambda p: (p.get("label", ""), p.get("detail", "")))
+
+        self._notif_runsummary(data.get("lastRun", []))
+        self._set_notif_badge(data.get("badge", 0))
+
+    def _notif_section(self, title, color, items, fmt) -> None:
+        panel = self._surface_panel(self.notif_body)
+        panel.pack(fill="x", pady=(0, 12))
+
+        head = ctk.CTkFrame(panel, fg_color="transparent")
+        head.pack(fill="x", padx=18, pady=(14, 4))
+        ctk.CTkLabel(head, text=title, font=_F(14, True),
+                     text_color=color).pack(side="left")
+        ctk.CTkLabel(head, text=f"   {len(items)}", font=_F(13, True),
+                     text_color=TXT3).pack(side="left")
+
+        if not items:
+            ctk.CTkLabel(panel, text="ไม่มีรายการ", font=_F(12),
+                         text_color=SUCCESS).pack(anchor="w", padx=18,
+                                                  pady=(0, 14))
+            return
+
+        for it in items:
+            line1, line2 = fmt(it)
+            row = ctk.CTkFrame(panel, fg_color=SURFACE2, corner_radius=6)
+            row.pack(fill="x", padx=14, pady=3)
+            ctk.CTkLabel(row, text=line1, font=_F(12, True), text_color=TXT,
+                         anchor="w", justify="left", wraplength=720,
+                         ).pack(anchor="w", padx=12, pady=(8, 0))
+            if line2:
+                ctk.CTkLabel(row, text=line2, font=_F(11), text_color=TXT2,
+                             anchor="w", justify="left", wraplength=720,
+                             ).pack(anchor="w", padx=12, pady=(2, 8))
+            else:
+                ctk.CTkLabel(row, text="", height=4).pack()
+        ctk.CTkLabel(panel, text="", height=6).pack()
+
+    def _notif_runsummary(self, rows) -> None:
+        panel = self._surface_panel(self.notif_body)
+        panel.pack(fill="x", pady=(0, 12))
+        ctk.CTkLabel(panel, text="สรุปกิจกรรมล่าสุด", font=_F(14, True),
+                     text_color=TXT2).pack(anchor="w", padx=18, pady=(14, 6))
+
+        if not rows:
+            ctk.CTkLabel(panel, text="ไม่มีข้อมูล", font=_F(12),
+                         text_color=TXT3).pack(anchor="w", padx=18,
+                                               pady=(0, 14))
+            return
+
+        for r in rows:
+            line = ctk.CTkFrame(panel, fg_color="transparent")
+            line.pack(fill="x", padx=18, pady=2)
+            ctk.CTkLabel(line, text=r.get("part", "?"), font=_F(12, True),
+                         text_color=TXT, width=70, anchor="w").pack(side="left")
+            ctk.CTkLabel(line,
+                         text=(f"สำเร็จ {r.get('success', 0)}    "
+                               f"Queue {r.get('queued', 0)}    "
+                               f"ข้าม {r.get('skip', 0)}    "
+                               f"Error {r.get('error', 0)}"),
+                         font=_F(12), text_color=TXT2, anchor="w",
+                         ).pack(side="left")
+            ctk.CTkLabel(line, text=r.get("lastTs", "")[:19].replace("T", " "),
+                         font=_F(11), text_color=TXT3, anchor="e",
+                         ).pack(side="right")
+        ctk.CTkLabel(panel, text="", height=6).pack()
+
+    def _set_notif_badge(self, n: int) -> None:
+        sb = self._sb_canvas
+        if not sb:
+            return
+        if n and n > 0:
+            self._notif_badge.configure(text=("9+" if n > 9 else str(n)))
+            sb.itemconfigure(self._notif_badge_win, state="normal")
+            sb.tag_raise(self._notif_badge_win)
+        else:
+            sb.itemconfigure(self._notif_badge_win, state="hidden")
+
     # ── Form helpers ──────────────────────────────────────────────────────────
 
     def _field(self, parent, label, cfg_key, ph="", show=None):
@@ -711,6 +872,9 @@ class MTechApp(ctk.CTk):
                     self.after(0, lambda: self._show_rerun_banner(msg, action, params, label))
             except Exception as e:
                 self._out(f"        ✗  {e}\n")
+            finally:
+                # งานที่รันไปอาจเปลี่ยนการแจ้งเตือน — รีเฟรช badge เงียบๆ
+                self.after(1200, lambda: self._load_notifications(silent=True))
 
         threading.Thread(target=_t, daemon=True).start()
 

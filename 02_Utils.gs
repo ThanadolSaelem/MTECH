@@ -516,12 +516,15 @@ function tryRecoverPeakDoc_(endpoint, code) {
                || (res.data && Array.isArray(res.data) ? res.data : null)
                || (Array.isArray(res) ? res : null);
     if (Array.isArray(items) && items.length > 0) {
-      const doc = items[0];
-      return doc.receiptCode || doc.taxInvoiceCode || doc.invoiceCode || doc.code || null;
+      // ต้อง validate ว่า doc ที่ได้กลับมา code ตรงกับที่ขอ
+      // ถ้า PEAK API ไม่ filter ให้ถูก items[0] จะเป็น doc ของ contract อื่น
+      const match = items.find(doc => doc.code === code);
+      if (!match) return null;
+      return match.receiptCode || match.taxInvoiceCode || match.invoiceCode || null;
     }
-    // Single-object response
-    if (res && (res.receiptCode || res.taxInvoiceCode || res.invoiceCode || res.code)) {
-      return res.receiptCode || res.taxInvoiceCode || res.invoiceCode || res.code;
+    // Single-object response — validate code ก่อนคืน
+    if (res && res.code === code) {
+      return res.receiptCode || res.taxInvoiceCode || res.invoiceCode || null;
     }
   } catch (e) {
     Logger.log(`tryRecoverPeakDoc_ ${endpoint}?code=${code}: ${e.message}`);
