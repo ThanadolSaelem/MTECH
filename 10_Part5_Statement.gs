@@ -62,7 +62,11 @@ function runPart5_StatementMatch(statementSheetName, receiptSheetName) {
     const note     = String(stRow[fmt.col.NOTE] || '').trim();
     const bankDesc = String(stRow[fmt.col.DESC] || '').trim();
 
-    const invCode = extractInv_(note);
+    let invCode = extractInv_(note);
+    if (!invCode && fmt.col.INV !== undefined) {
+      const rawInv = normalizeInv_(String(stRow[fmt.col.INV] || '').trim());
+      if (rawInv) invCode = rawInv;
+    }
 
     if (!invCode) {
       report.push([bankDate, deposit, note, '', 'ยังไม่กรอก INV', '', '', '', '', bankDesc]);

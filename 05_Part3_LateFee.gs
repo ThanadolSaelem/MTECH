@@ -134,6 +134,7 @@ function submitLateFeesBatch_(sheet, batch, sheetName, feeDocCol, headerRow, pmt
     ensureContactsBatch_(codeNameMap);
 
     const payloads = [];
+    const queuedItems = [];  // parallel to payloads — only items actually submitted
     for (const item of batch) {
       const contactUuid = getContactId_(item.invCode);
       if (!contactUuid) {
@@ -142,13 +143,14 @@ function submitLateFeesBatch_(sheet, batch, sheetName, feeDocCol, headerRow, pmt
         continue;
       }
       payloads.push(buildLateFeePayload(item, contactUuid, pmtInfo));
+      queuedItems.push(item);
     }
     if (payloads.length === 0) return { ok: 0, err: 0 };
 
     const res = callPeakAPI('post', '/receipts/queue', { PeakReceipts: { receipts: payloads } });
     const queueId = res.queueId || res.id || 'unknown';
 
-    const meta = batch.map(item => ({
+    const meta = queuedItems.map(item => ({
       rowIndex:     item.rowIndex,
       invCode:      item.invCode,
       docType:      'FEE',

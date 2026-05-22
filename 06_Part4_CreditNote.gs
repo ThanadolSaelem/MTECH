@@ -119,13 +119,29 @@ function runPart4_CreditNote() {
       countOk++;
 
     } catch (e) {
-      writeCell(sheet, i, CONFIG.RETURN_COL.Q, '');  // ลบ PROCESSING
-      if (classifyError_(e) === 'quota') {
+      const kind = classifyError_(e);
+      if (kind === 'quota') {
+        writeCell(sheet, i, CONFIG.RETURN_COL.Q, '');
         logEntry('Part4', CONFIG.RETURN_SHEET_NAME, i, invCode, 'WARN', '', `หยุดชั่วคราว (quota): ${e.message}`);
         quotaHit = true;
         stoppedEarly = true;
         break;
       }
+      if (kind === 'duplicate') {
+        const cnRef = buildReference(invCode, formatDateForAPI(returnDate), 'CN');
+        const recovered = tryRecoverPeakDoc_('/creditnotes', cnRef);
+        if (recovered) {
+          writeCell(sheet, i, CONFIG.RETURN_COL.Q, recovered);
+          logEntry('Part4', CONFIG.RETURN_SHEET_NAME, i, invCode, 'SUCCESS', recovered, 'กู้เลขเอกสารซ้ำ');
+          countOk++;
+        } else {
+          writeCell(sheet, i, CONFIG.RETURN_COL.Q, CONFIG.DUPLICATE_MARKER);
+          logEntry('Part4', CONFIG.RETURN_SHEET_NAME, i, invCode, 'WARN', CONFIG.DUPLICATE_MARKER,
+            'ใบลดหนี้มีใน PEAK แล้ว — ค้นหาเลขที่ใน PEAK แล้วอัปเดตเซลล์ด้วยตนเอง');
+        }
+        continue;
+      }
+      writeCell(sheet, i, CONFIG.RETURN_COL.Q, '');
       logEntry('Part4', CONFIG.RETURN_SHEET_NAME, i, invCode, 'ERROR', '', e.message);
       countError++;
     }

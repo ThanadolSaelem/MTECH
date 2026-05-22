@@ -83,15 +83,30 @@ function runPart2_Invoice(sheetName) {
       logEntry('Part2', sheetName, i, invCode, 'SUCCESS', docNo);
       countOk++;
     } catch (e) {
-      writeSumCell_(sheet, i, invDocCol, '');
-      if (classifyError_(e) === 'quota') {
+      const kind = classifyError_(e);
+      if (kind === 'duplicate') {
+        // ใบแจ้งหนี้นี้มีใน PEAK แล้วจากรอบก่อน — กู้เลขเอกสารคืน
+        const recovered = tryRecoverPeakDoc_('/invoices', buildReference(invCode, 'ALL', 'INV'));
+        if (recovered) {
+          writeSumCell_(sheet, i, invDocCol, recovered);
+          logEntry('Part2', sheetName, i, invCode, 'SUCCESS', recovered, 'กู้เลขเอกสารซ้ำ');
+          countOk++;
+        } else {
+          writeSumCell_(sheet, i, invDocCol, CONFIG.DUPLICATE_MARKER);
+          logEntry('Part2', sheetName, i, invCode, 'WARN', CONFIG.DUPLICATE_MARKER,
+            'ใบแจ้งหนี้มีใน PEAK แล้ว — ค้นหาเลขที่ใน PEAK แล้วอัปเดตเซลล์ด้วยตนเอง');
+        }
+      } else if (kind === 'quota') {
+        writeSumCell_(sheet, i, invDocCol, '');
         logEntry('Part2', sheetName, i, invCode, 'WARN', '', `หยุดชั่วคราว (quota): ${e.message}`);
         quotaHit = true;
         stoppedEarly = true;
         break;
+      } else {
+        writeSumCell_(sheet, i, invDocCol, '');
+        logEntry('Part2', sheetName, i, invCode, 'ERROR', '', e.message);
+        countError++;
       }
-      logEntry('Part2', sheetName, i, invCode, 'ERROR', '', e.message);
-      countError++;
     }
   }
 

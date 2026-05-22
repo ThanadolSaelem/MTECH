@@ -520,11 +520,11 @@ function tryRecoverPeakDoc_(endpoint, code) {
       // ถ้า PEAK API ไม่ filter ให้ถูก items[0] จะเป็น doc ของ contract อื่น
       const match = items.find(doc => doc.code === code);
       if (!match) return null;
-      return match.receiptCode || match.taxInvoiceCode || match.invoiceCode || null;
+      return match.receiptCode || match.taxInvoiceCode || match.invoiceCode || match.creditNoteCode || null;
     }
     // Single-object response — validate code ก่อนคืน
     if (res && res.code === code) {
-      return res.receiptCode || res.taxInvoiceCode || res.invoiceCode || null;
+      return res.receiptCode || res.taxInvoiceCode || res.invoiceCode || res.creditNoteCode || null;
     }
   } catch (e) {
     Logger.log(`tryRecoverPeakDoc_ ${endpoint}?code=${code}: ${e.message}`);
@@ -533,8 +533,10 @@ function tryRecoverPeakDoc_(endpoint, code) {
 }
 
 // ─── Quota Handling & Resumable Execution ────────────────────────────────────
-// Production: PEAK ไม่มี Transaction Limit (เป็นข้อจำกัดของ UAT sandbox เท่านั้น)
-// โควตาที่ต้องรับมือจริง = GAS execution time 6 นาที + rate limit ชั่วคราว
+// PEAK rate limits (ชั่วคราว ไม่ใช่ตลอดชีพ):
+//   - POST concurrent: max 5 ต่อ User Token (HTTP 429 type=concurrency) → retry 8s อัตโนมัติ
+//   - Rate limit: 10 req/min สำหรับ /clienttoken เท่านั้น (token แคช 23 ชม. แล้ว)
+//   - "Transaction Limit exceeded" (HTTP 400) = rate limit ชั่วคราวเช่นกัน ไม่ใช่ quota ถาวร
 // กลยุทธ์: runner หยุดเองก่อนหมดเวลา/เจอ quota → ตั้ง trigger ทำต่ออัตโนมัติ
 // runner ทุกตัว idempotent (ข้ามแถวที่มีเลขเอกสารแล้ว) จึง resume ได้ปลอดภัย
 
