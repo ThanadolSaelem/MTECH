@@ -158,6 +158,7 @@ class MTechApp(ctk.CTk):
         self._cur_page:      str                      = ""
         self._sb_canvas:     tk.Canvas | None         = None
         self._sb_status_id:  int                      = 0
+        self._task_running:  bool                     = False
 
         self._build_ui()
         self._show_page("dashboard" if self.cfg["gas_url"] else "settings")
@@ -416,7 +417,8 @@ class MTechApp(ctk.CTk):
                 self.after(0, self._show_offline)
                 self.after(0, lambda: self.dash_meta.configure(text="Offline"))
             except Exception as e:
-                self.after(0, lambda: self.dash_meta.configure(text=str(e)))
+                msg = str(e)
+                self.after(0, lambda: self.dash_meta.configure(text=msg))
 
         threading.Thread(target=_t, daemon=True).start()
 
@@ -821,15 +823,18 @@ class MTechApp(ctk.CTk):
         def _t():
             try:
                 self.client.ping()
-                self.status_dot.configure(text="● Connected", fg=SUCCESS)
+                self.after(0, lambda: self.status_dot.configure(
+                    text="● Connected", fg=SUCCESS))
                 if verbose:
                     self._status("✅  เชื่อมต่อสำเร็จ", ok=True)
             except NoInternetError:
-                self.status_dot.configure(text="● Offline", fg=DANGER)
+                self.after(0, lambda: self.status_dot.configure(
+                    text="● Offline", fg=DANGER))
                 if verbose:
                     self.after(0, self._show_offline)
             except Exception as e:
-                self.status_dot.configure(text="● Error", fg=WARNING)
+                self.after(0, lambda: self.status_dot.configure(
+                    text="● Error", fg=WARNING))
                 if verbose:
                     self._status(str(e), err=True)
         threading.Thread(target=_t, daemon=True).start()
@@ -847,6 +852,10 @@ class MTechApp(ctk.CTk):
         self._run_with_params(action, params, label)
 
     def _run_with_params(self, action: str, params: dict, label: str) -> None:
+        if self._task_running:
+            self._out("        ⚠  มี task กำลังทำงานอยู่ — รอให้เสร็จก่อนครับ\n")
+            return
+        self._task_running = True
         self._hide_rerun_banner()
         ts = datetime.now().strftime("%H:%M:%S")
         self.task_out.insert("end", f"[{ts}]  {label}\n")
@@ -873,6 +882,7 @@ class MTechApp(ctk.CTk):
             except Exception as e:
                 self._out(f"        ✗  {e}\n")
             finally:
+                self._task_running = False
                 # งานที่รันไปอาจเปลี่ยนการแจ้งเตือน — รีเฟรช badge เงียบๆ
                 self.after(1200, lambda: self._load_notifications(silent=True))
 
@@ -894,8 +904,10 @@ class MTechApp(ctk.CTk):
             self._run_with_params(action, params, label)
 
     def _out(self, t: str) -> None:
-        self.task_out.insert("end", t)
-        self.task_out.see("end")
+        def _do():
+            self.task_out.insert("end", t)
+            self.task_out.see("end")
+        self.after(0, _do)
 
     @staticmethod
     def _str(obj) -> str:
@@ -911,17 +923,24 @@ class MTechApp(ctk.CTk):
         def _t():
             try:
                 rows = self.client.call("logs/tail", {"limit": 80}, timeout=60)
-                self.logs_box.delete("1.0", "end")
-                for r in rows:
-                    self.logs_box.insert("end",
-                        f"{r['ts'][:19]}  [{r['part']}]  {r['sheet']}  "
-                        f"row {r['row']}  {r['inv']}  {r['status']}  "
-                        f"{r['doc']}  {r['msg']}\n")
+                lines = []
+                for r in (rows or []):
+                    lines.append(
+                        f"{str(r.get('ts', ''))[:19]}  [{r.get('part', '')}]  "
+                        f"{r.get('sheet', '')}  row {r.get('row', '')}  "
+                        f"{r.get('inv', '')}  {r.get('status', '')}  "
+                        f"{r.get('doc', '')}  {r.get('msg', '')}\n")
+                text = "".join(lines) or "(ไม่มี log)\n"
+                def _do():
+                    self.logs_box.delete("1.0", "end")
+                    self.logs_box.insert("end", text)
+                self.after(0, _do)
             except NoInternetError:
-                self.logs_box.insert("end", "Offline\n")
+                self.after(0, lambda: self.logs_box.insert("end", "Offline\n"))
                 self.after(0, self._show_offline)
             except Exception as e:
-                self.logs_box.insert("end", f"{e}\n")
+                msg = str(e)
+                self.after(0, lambda: self.logs_box.insert("end", f"{msg}\n"))
         threading.Thread(target=_t, daemon=True).start()
 
     # ── Offline dialog ────────────────────────────────────────────────────────

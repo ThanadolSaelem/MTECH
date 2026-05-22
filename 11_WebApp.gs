@@ -33,7 +33,9 @@ function doPost(e) {
     const data = routeAction_(action, params || {});
     return jsonResponse_({ ok: true, data });
   } catch (e) {
-    return jsonResponse_({ ok: false, error: e.message, stack: String(e.stack).substring(0, 500) });
+    // stack เก็บไว้ฝั่ง server เท่านั้น — ไม่ส่งออกไปให้ client (เลี่ยง info leak)
+    Logger.log(`doPost error: ${(e && e.stack) || (e && e.message) || e}`);
+    return jsonResponse_({ ok: false, error: String((e && e.message) || e) });
   }
 }
 
@@ -134,6 +136,7 @@ function getQueueStatusJson_() {
 }
 
 function getLogsTail_(limit) {
+  limit = Math.max(1, Math.min(500, parseInt(limit, 10) || 50));
   const log = getLogSheet();
   const lastRow = log.getLastRow();
   if (lastRow <= 1) return [];

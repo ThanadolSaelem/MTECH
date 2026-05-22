@@ -496,8 +496,11 @@ function clearAllQueueEntries() {
  * ตรวจว่า error เป็น "Transaction number is duplicated" (PEAK error 315)
  */
 function isDuplicateCodeError_(e) {
-  const msg = (e && e.message) ? e.message : String(e);
-  return msg.includes('315') || msg.toLowerCase().includes('duplicat');
+  const msg = ((e && e.message) ? e.message : String(e)).toLowerCase();
+  // จับเฉพาะ error 315 จริง — ไม่ใช่เลข "315" ที่บังเอิญอยู่ในยอดเงิน/รหัสสัญญา
+  return msg.includes('duplicat')
+      || msg.includes('เลขที่เอกสารซ้ำ')
+      || /peak api 315\b/.test(msg);
 }
 
 /**
@@ -564,8 +567,9 @@ function isQuotaError_(e) {
  * @returns {'duplicate'|'quota'|'transient'|'permanent'}
  */
 function classifyError_(e) {
-  if (isDuplicateCodeError_(e)) return 'duplicate';
+  // quota ก่อน duplicate — ข้อความ quota อาจมีเลข/คำที่ duplicate-check จับผิดได้
   if (isQuotaError_(e))         return 'quota';
+  if (isDuplicateCodeError_(e)) return 'duplicate';
   const msg = ((e && e.message) ? e.message : String(e)).toLowerCase();
   if (msg.includes('http 500') || msg.includes('http 502') || msg.includes('http 503')
    || msg.includes('http 504') || msg.includes('timeout') || msg.includes('timed out')
