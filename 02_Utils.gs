@@ -533,8 +533,10 @@ function tryRecoverPeakDoc_(endpoint, code) {
 }
 
 // ─── Quota Handling & Resumable Execution ────────────────────────────────────
-// Production: PEAK ไม่มี Transaction Limit (เป็นข้อจำกัดของ UAT sandbox เท่านั้น)
-// โควตาที่ต้องรับมือจริง = GAS execution time 6 นาที + rate limit ชั่วคราว
+// PEAK rate limits (ชั่วคราว ไม่ใช่ตลอดชีพ):
+//   - POST concurrent: max 5 ต่อ User Token (HTTP 429 type=concurrency) → retry 8s อัตโนมัติ
+//   - Rate limit: 10 req/min สำหรับ /clienttoken เท่านั้น (token แคช 23 ชม. แล้ว)
+//   - "Transaction Limit exceeded" (HTTP 400) = rate limit ชั่วคราวเช่นกัน ไม่ใช่ quota ถาวร
 // กลยุทธ์: runner หยุดเองก่อนหมดเวลา/เจอ quota → ตั้ง trigger ทำต่ออัตโนมัติ
 // runner ทุกตัว idempotent (ข้ามแถวที่มีเลขเอกสารแล้ว) จึง resume ได้ปลอดภัย
 

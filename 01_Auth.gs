@@ -116,9 +116,28 @@ function callPeakAPI(method, path, payload, params) {
     options.payload = JSON.stringify(payload);
   }
 
-  const res = UrlFetchApp.fetch(url, options);
-  const code = res.getResponseCode();
-  const text = res.getContentText();
+  let res = UrlFetchApp.fetch(url, options);
+  let code = res.getResponseCode();
+  let text = res.getContentText();
+
+  // ─── 429 Retry: concurrency limit แก้ได้ภายในไม่กี่วินาที ──────────────────
+  if (code === 429) {
+    let parsed429 = {};
+    try { parsed429 = JSON.parse(text); } catch (_) {}
+    const limitType    = parsed429.type || 'rate';  // "concurrency" | "rate"
+    const retryAfterSec = parsed429.retryAfterSeconds;
+
+    if (limitType === 'concurrency' || retryAfterSec === null || retryAfterSec === undefined) {
+      // Concurrency 429: request อื่นกำลัง in-flight — รอแล้ว retry 1 ครั้ง
+      Logger.log(`PEAK concurrency limit on ${method.toUpperCase()} ${path} — retry in 8s`);
+      Utilities.sleep(8000);
+      res  = UrlFetchApp.fetch(url, options);
+      code = res.getResponseCode();
+      text = res.getContentText();
+    }
+    // Rate 429 (retryAfterSeconds=60): หยุด run ทันที — ไม่ retry inline
+    // code/text ยังคงเป็น 429 → โค้ดด้านล่างจะ throw → classifyError_='quota'
+  }
 
   let data;
   try {
