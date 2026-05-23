@@ -20,6 +20,9 @@
 !capture_screenshots.py
 !generate_manual.py
 !generate_flowchart.py
+!bugfix_agent/
+!bugfix_agent/agent.py
+!bugfix_agent/requirements.txt
 !MTECH_API_Flow.png
 !MTECH_API_Flow.pdf
 !manual_screenshots/
