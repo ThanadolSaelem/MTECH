@@ -1,29 +1,91 @@
-"""Generate updated MPTECH manual — replaces MTECH→MPTECH and appends new chapters."""
+"""
+Generate คู่มือการใช้งาน_MPTECH.docx
+- Clones source docx (MTECH→MPTECH throughout)
+- Replaces ALL existing images (paras 29/45/59/73) with fresh Xvfb screenshots
+- Appends บทที่ 6 (Notifications), 7 (Error guide), 8 (Reference)
+"""
 from __future__ import annotations
 import os
 from docx import Document
-from docx.shared import Pt, Cm, RGBColor
+from docx.shared import Pt, Cm, RGBColor, Emu
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from PIL import Image as PILImage
 
-SRC  = "/root/.claude/uploads/c2ca23fd-b630-4e72-9013-1ebfca2f7f24/c888ec48-________________MTECH.docx"
-OUT  = "/home/user/MTECH/คู่มือการใช้งาน_MPTECH.docx"
-SS   = "/home/user/MTECH/manual_screenshots"
+SRC = "/root/.claude/uploads/c2ca23fd-b630-4e72-9013-1ebfca2f7f24/c888ec48-________________MTECH.docx"
+OUT = "/home/user/MTECH/คู่มือการใช้งาน_MPTECH.docx"
+SS  = "/home/user/MTECH/manual_screenshots"
 
 def ss(name):
     new = f"{SS}/ss_{name}_new.png"
     old = f"{SS}/ss_{name}.png"
     return new if os.path.exists(new) else old
 
+SS_SET   = ss("settings")
 SS_DASH  = ss("dashboard")
 SS_TASKS = ss("tasks")
-SS_NOTIF = f"{SS}/ss_notifications.png"
-SS_SET   = ss("settings")
 SS_LOGS  = ss("logs")
+SS_NOTIF = f"{SS}/ss_notifications.png"
 
-FONT = "TH Sarabun New"
-IMG_W = Cm(15)
+FONT  = "TH Sarabun New"
+IMG_W = Cm(15)  # 5,400,000 EMU
+
+# ── Image utilities ────────────────────────────────────────────────────────────
+
+def _img_extent(path: str, width_emu: int) -> tuple[int, int]:
+    """Return (cx, cy) maintaining aspect ratio."""
+    with PILImage.open(path) as im:
+        w, h = im.size
+    return width_emu, int(width_emu * h / w)
+
+def _add_image_rel(doc: Document, img_path: str) -> str:
+    """Add image to document part, return rId."""
+    rId, _image = doc.part.get_or_add_image(img_path)
+    return rId
+
+def replace_image_in_para(doc: Document, para_idx: int, img_path: str) -> None:
+    """Replace the first image in paragraph[para_idx] with img_path."""
+    p = doc.paragraphs[para_idx]
+
+    # Find blip
+    blip = p._p.find('.//' + qn('a:blip'))
+    if blip is None:
+        print(f"  WARNING: no blip in para {para_idx}")
+        return
+
+    # Find extent element to update dimensions
+    ext = p._p.find('.//' + qn('wp:extent'))
+
+    # Add new image relationship
+    rId = _add_image_rel(doc, img_path)
+
+    # Update blip embed
+    blip.set(qn('r:embed'), rId)
+
+    # Update extent dimensions
+    if ext is not None:
+        cx, cy = _img_extent(img_path, int(IMG_W))
+        ext.set('cx', str(cx))
+        ext.set('cy', str(cy))
+        # Also update the xfrm ext inside spPr
+        xfrm_ext = p._p.find('.//' + qn('a:ext'))
+        if xfrm_ext is not None:
+            xfrm_ext.set('cx', str(cx))
+            xfrm_ext.set('cy', str(cy))
+
+    # Update docPr name to avoid conflicts
+    docPr = p._p.find('.//' + qn('wp:docPr'))
+    if docPr is not None:
+        docPr.set('name', os.path.basename(img_path))
+    cNvPr = p._p.find('.//' + qn('pic:cNvPr'))
+    if cNvPr is not None:
+        cNvPr.set('name', os.path.basename(img_path))
+
+    print(f"  ✓ para {para_idx} image replaced → {os.path.basename(img_path)}")
+
+# ── Font helpers ───────────────────────────────────────────────────────────────
 
 def _run_font(run, size_pt, bold=False, color=None):
     run.font.name = FONT
@@ -52,7 +114,8 @@ def add_image(doc, path, caption=""):
         return
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p.add_run().add_picture(path, width=IMG_W)
+    run = p.add_run()
+    run.add_picture(path, width=IMG_W)
     if caption:
         c = doc.add_paragraph(caption)
         c.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -68,12 +131,23 @@ def _shade_cell(cell, fill_hex):
     shd.set(qn("w:fill"), fill_hex)
     tcPr.append(shd)
 
-def add_callout(doc, icon, text, bg=(0xff,0xf3,0xc7)):
+def add_callout(doc, icon, text, bg=(0xff, 0xf3, 0xc7)):
     tbl = doc.add_table(rows=1, cols=1)
-    tbl.style = 'TableNormal'
+    tbl.style = "TableNormal"
     cell = tbl.rows[0].cells[0]
     cell.text = ""
     _shade_cell(cell, "%02x%02x%02x" % bg)
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    tblBorders = OxmlElement("w:tcBorders")
+    for side in ("top", "left", "bottom", "right"):
+        b = OxmlElement(f"w:{side}")
+        b.set(qn("w:val"), "single")
+        b.set(qn("w:sz"), "8")
+        b.set(qn("w:space"), "0")
+        b.set(qn("w:color"), "888888")
+        tblBorders.append(b)
+    tcPr.append(tblBorders)
     p = cell.paragraphs[0]
     run = p.add_run(f"{icon}  {text}")
     _run_font(run, 13)
@@ -81,11 +155,13 @@ def add_callout(doc, icon, text, bg=(0xff,0xf3,0xc7)):
 
 def add_numbered_steps(doc, steps):
     tbl = doc.add_table(rows=len(steps), cols=2)
-    tbl.style = 'TableNormal'
+    tbl.style = "TableNormal"
     for i, step in enumerate(steps):
         c0, c1 = tbl.rows[i].cells[0], tbl.rows[i].cells[1]
+        c0.width = Cm(1.4)
+        c1.width = Cm(17)
         p0 = c0.paragraphs[0]
-        r0 = p0.add_run(str(i+1))
+        r0 = p0.add_run(str(i + 1))
         _run_font(r0, 13, bold=True)
         p0.alignment = WD_ALIGN_PARAGRAPH.CENTER
         r1 = c1.paragraphs[0].add_run(step)
@@ -93,8 +169,8 @@ def add_numbered_steps(doc, steps):
     doc.add_paragraph()
 
 def add_table(doc, headers, rows, col_widths=None):
-    tbl = doc.add_table(rows=1+len(rows), cols=len(headers))
-    tbl.style = 'TableNormal'
+    tbl = doc.add_table(rows=1 + len(rows), cols=len(headers))
+    tbl.style = "TableNormal"
     for j, h in enumerate(headers):
         cell = tbl.rows[0].cells[j]
         cell.text = ""
@@ -105,13 +181,15 @@ def add_table(doc, headers, rows, col_widths=None):
             cell.width = Cm(col_widths[j])
     for i, row in enumerate(rows):
         for j, val in enumerate(row):
-            cell = tbl.rows[i+1].cells[j]
+            cell = tbl.rows[i + 1].cells[j]
             cell.text = ""
             r = cell.paragraphs[0].add_run(str(val))
             _run_font(r, 13)
             if col_widths:
                 cell.width = Cm(col_widths[j])
     doc.add_paragraph()
+
+# ── Clone source + rename ──────────────────────────────────────────────────────
 
 def clone_and_rename(src_path):
     doc = Document(src_path)
@@ -129,7 +207,9 @@ def clone_and_rename(src_path):
     doc.core_properties.title = "คู่มือการใช้งาน MPTECH ระบบบัญชี"
     return doc
 
-def build(doc):
+# ── New chapters ──────────────────────────────────────────────────────────────
+
+def build_new_chapters(doc):
     doc.add_page_break()
 
     # ── บทที่ 6 หน้าแจ้งเตือน ────────────────────────────────────────────────
@@ -200,7 +280,7 @@ def build(doc):
              "1. ตรวจสอบ WiFi / สายแลน\n2. ทดสอบเปิดเว็บ browser\n3. กลับมากด Test Connection"],
             ["● Error หรือ ● Offline (มุมล่างซ้าย)",
              "เชื่อมต่อ GAS ไม่ได้ หรือ URL ผิด",
-             "Settings → ตรวจ URL → Test Connection"],
+             "Settings → ตรวจ URL → กด Test Connection"],
         ],
         col_widths=[5.5, 4.5, 8.5]
     )
@@ -238,7 +318,7 @@ def build(doc):
              "ส่ง request ถี่เกินไป (rate limit)",
              "ระบบ retry อัตโนมัติแล้ว — ถ้ายังค้าง รอ 30 วินาทีแล้ว Run อีกครั้ง"],
             ["เลขที่เอกสารซ้ำ / Duplicate document",
-             "เอกสารนี้ถูกสร้างใน PEAK แล้ว",
+             "เอกสารนี้ถูกสร้างใน PEAK แล้ว ระบบ detect ได้",
              "ระบบบันทึก [DUP] ให้อัตโนมัติ — งานเสร็จแล้ว ไม่ต้องทำอะไร"],
             ["ไม่พบ Contact / Contact not found",
              "สัญญา (invCode) ยังไม่ sync ไปยัง PEAK Contacts",
@@ -317,22 +397,14 @@ def build(doc):
     add_table(doc,
         ["Task", "ใช้เมื่อไหร่", "ต้องใส่เดือน", "เวลาโดยประมาณ"],
         [
-            ["Part 1 — ออกใบกำกับภาษี",
-             "ต้นเดือน หลังรวบรวม Receipt ครบ", "✅", "3–10 นาที"],
-            ["Part 1 — ค่าบริการเพิ่มเติม",
-             "มีค่าบริการพิเศษนอกเหนือปกติ", "✅", "1–3 นาที"],
-            ["Part 2 — ออกใบแจ้งหนี้ bulk",
-             "มีสัญญาใหม่ที่ต้องออกใบแจ้งหนี้", "✅", "2–5 นาที"],
-            ["Part 3 — ออกใบเสร็จค่าปรับ",
-             "มีรายการค่าปรับ/ค่าชดเชย", "✅", "1–3 นาที"],
-            ["Part 4 — ออกใบลดหนี้ (คืนเครื่อง)",
-             "มีการคืนเครื่อง/ยกเลิกสัญญา", "❌", "1–2 นาที"],
-            ["Part 5 — Match Statement",
-             "ทุกเดือน หลังได้ Statement ธนาคาร", "✅ (2 ชีต)", "2–5 นาที"],
-            ["Poll Queue ทันที",
-             "หลัง Part 1/2/3 ถ้ามี Queue ค้าง", "❌", "< 1 นาที"],
-            ["ทดสอบ PEAK Connection",
-             "เมื่อสงสัยว่า PEAK API มีปัญหา", "❌", "< 30 วินาที"],
+            ["Part 1 — ออกใบกำกับภาษี", "ต้นเดือน หลังรวบรวม Receipt ครบ", "✅", "3–10 นาที"],
+            ["Part 1 — ค่าบริการเพิ่มเติม", "มีค่าบริการพิเศษนอกเหนือปกติ", "✅", "1–3 นาที"],
+            ["Part 2 — ออกใบแจ้งหนี้ bulk", "มีสัญญาใหม่ที่ต้องออกใบแจ้งหนี้", "✅", "2–5 นาที"],
+            ["Part 3 — ออกใบเสร็จค่าปรับ", "มีรายการค่าปรับ/ค่าชดเชย", "✅", "1–3 นาที"],
+            ["Part 4 — ออกใบลดหนี้ (คืนเครื่อง)", "มีการคืนเครื่อง/ยกเลิกสัญญา", "❌", "1–2 นาที"],
+            ["Part 5 — Match Statement", "ทุกเดือน หลังได้ Statement ธนาคาร", "✅ (2 ชีต)", "2–5 นาที"],
+            ["Poll Queue ทันที", "หลัง Part 1/2/3 ถ้ามี Queue ค้าง", "❌", "< 1 นาที"],
+            ["ทดสอบ PEAK Connection", "เมื่อสงสัยว่า PEAK API มีปัญหา", "❌", "< 30 วินาที"],
         ],
         col_widths=[5.0, 5.5, 3, 4]
     )
@@ -344,13 +416,31 @@ def build(doc):
         bg=(0xef, 0xf6, 0xff))
 
 
-print("Reading source document...")
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+print("1. Cloning source docx + renaming MTECH→MPTECH...")
 doc = clone_and_rename(SRC)
 
-print("Appending new chapters...")
-build(doc)
+print("2. Replacing existing screenshots...")
+# para 29 = Settings (บทที่ 3)
+# para 45 = Dashboard (บทที่ 4)
+# para 59 = Tasks (บทที่ 5)
+# para 73 = Logs (บทที่ 6 เก่า)
+for para_idx, img_path, label in [
+    (29, SS_SET,   "Settings"),
+    (45, SS_DASH,  "Dashboard"),
+    (59, SS_TASKS, "Tasks"),
+    (73, SS_LOGS,  "Logs"),
+]:
+    if os.path.exists(img_path):
+        replace_image_in_para(doc, para_idx, img_path)
+    else:
+        print(f"  SKIP {label}: file not found → {img_path}")
 
-print(f"Saving → {OUT}")
+print("3. Appending new chapters...")
+build_new_chapters(doc)
+
+print(f"4. Saving → {OUT}")
 doc.save(OUT)
 sz = os.path.getsize(OUT)
 print(f"Done! {sz:,} bytes")
