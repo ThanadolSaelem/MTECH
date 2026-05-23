@@ -409,7 +409,27 @@ def build_new_chapters(doc):
         col_widths=[5.0, 5.5, 3, 4]
     )
 
-    add_heading(doc, "8.3  ผู้ดูแลระบบ", level=2)
+    add_heading(doc, "8.3  ข้อมูลการเชื่อมต่อ MPTECH", level=2)
+    add_para(doc,
+        "ข้อมูลด้านล่างนี้ใช้กรอกในหน้า Settings → Save Local "
+        "เพื่อให้โปรแกรมเชื่อมต่อกับ GAS ได้", size=13)
+    doc.add_paragraph()
+    add_table(doc,
+        ["รายการ", "ค่าที่ต้องกรอก"],
+        [
+            ["GAS Web App URL",
+             "https://script.google.com/macros/s/AKfycbwnBO4IdcSyIH3RBxCSgLjsVuKdsS_"
+             "Co3lCgZaZ2yCi8_XFo-PrYsZDC90tWW5dZNtm/exec"],
+            ["API Key", "finfin-secret-2026"],
+        ],
+        col_widths=[4.0, 14.5]
+    )
+    add_callout(doc, "📌",
+        "กรอกข้อมูลทั้ง 2 รายการในหน้า Settings → กด Save Local → กด Test Connection\n"
+        "ถ้า ● Connected (สีเขียว) แสดงที่มุมล่างซ้าย = เชื่อมต่อสำเร็จ พร้อมใช้งาน",
+        bg=(0xdc, 0xfc, 0xe7))
+
+    add_heading(doc, "8.4  ผู้ดูแลระบบ", level=2)
     add_callout(doc, "📌",
         "ทีม MPTECH — ติดต่อผ่าน Line หรือโทรตรงเมื่อพบปัญหาที่แก้ตามคู่มือแล้วยังไม่หาย\n"
         "ข้อมูลที่ควรเตรียม: Screenshot + ข้อความ Error เต็มๆ + ชื่อ Task ที่รัน + วันเวลา",
