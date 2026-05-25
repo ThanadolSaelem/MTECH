@@ -19,15 +19,25 @@ OUT = "/home/user/MTECH/คู่มือการใช้งาน_MPTECH.doc
 SS  = "/home/user/MTECH/manual_screenshots"
 
 def ss(name):
-    new = f"{SS}/ss_{name}_new.png"
-    old = f"{SS}/ss_{name}.png"
-    return new if os.path.exists(new) else old
+    for candidate in [
+        f"{SS}/ss_{name}_new.png",
+        f"{SS}/ss_{name}.png",
+        f"{SS}/ss_{name}.jpg",
+    ]:
+        if not os.path.exists(candidate):
+            continue
+        try:
+            PILImage.open(candidate).verify()
+            return candidate
+        except Exception:
+            continue
+    return f"{SS}/ss_{name}.png"  # let caller fail with a clear path
 
 SS_SET   = ss("settings")
 SS_DASH  = ss("dashboard")
 SS_TASKS = ss("tasks")
 SS_LOGS  = ss("logs")
-SS_NOTIF = f"{SS}/ss_notifications.png"
+SS_NOTIF = ss("notifications")
 
 FONT  = "TH Sarabun New"
 IMG_W = Cm(15)  # 5,400,000 EMU
@@ -110,6 +120,12 @@ def add_para(doc, text, size=14, bold=False, color=None):
 def add_image(doc, path, caption=""):
     if not os.path.exists(path):
         add_para(doc, f"[ภาพ: {os.path.basename(path)} — ไม่พบไฟล์]",
+                 size=12, color=RGBColor(0xb9, 0x1c, 0x1c))
+        return
+    try:
+        PILImage.open(path).verify()
+    except Exception:
+        add_para(doc, f"[ภาพ: {os.path.basename(path)} — ไฟล์เสียหาย]",
                  size=12, color=RGBColor(0xb9, 0x1c, 0x1c))
         return
     p = doc.add_paragraph()
