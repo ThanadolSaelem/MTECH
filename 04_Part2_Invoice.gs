@@ -67,10 +67,9 @@ function runPart2_Invoice(sheetName) {
     writeSumCell_(sheet, i, invDocCol, CONFIG.PROCESSING_MARKER);
 
     try {
-      // ensure contact exists + resolve UUID (Part 1 format: contact:{id,code})
+      // ensure contact exists — UUID optional (PEAK auto-creates from code+name if needed)
       ensureContactsBatch_({ [invCode]: customerName });
       const contactUuid = getContactId_(invCode);
-      if (!contactUuid) throw new Error('ไม่พบ contactId — รัน Sync Contacts ก่อน');
 
       const payload = buildInvoiceAllInOnePayload(
         invCode, contactUuid, contractDate, downPayment, installmentAmt,
@@ -160,7 +159,9 @@ function buildInvoiceAllInOnePayload(
     code:         buildReference(invCode, 'ALL', 'INV'),
     issuedDate:   formatDateForAPI(contractDate),
     dueDate:      formatDateForAPI(dueDates[dueDates.length - 1] || contractDate),
-    contact:      { id: contactUuid, code: String(invCode), name: customerName },
+    contact:      contactUuid
+      ? { id: contactUuid, code: String(invCode), name: customerName }
+      : { code: String(invCode), name: customerName },
     istaxInvoice: 1,
     taxStatus:    1,
     remark:       `ใบแจ้งหนี้ สัญญา ${invCode}${customerName ? ` — ${customerName}` : ''}`,

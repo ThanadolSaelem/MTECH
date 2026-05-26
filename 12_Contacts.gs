@@ -45,6 +45,7 @@ function ensureContactsBatch_(codeNameMap) {
       postRes = callPeakAPI('post', '/contacts/', {
         PeakContacts: { contacts: [{ code, name: displayName, type: 5 }] },
       });
+      Logger.log(`Contact POST raw [${code}]: ${JSON.stringify(postRes).slice(0, 300)}`);
     } catch (e) {
       const msg = String(e.message);
       if (/duplic|exist|already|มีอยู่/i.test(msg)) {
@@ -58,9 +59,11 @@ function ensureContactsBatch_(codeNameMap) {
       const inner = postRes.PeakContacts;
       const c = inner && (Array.isArray(inner.contacts) ? inner.contacts[0] : inner.contacts);
       const rc = String((c && c.resCode) || (inner && inner.resCode) || '');
-      if (rc === '200' || (c && c.id)) {
+      // รองรับ field id หลายชื่อ: id / contactId / Id
+      const idVal = (c && (c.id || c.contactId || c.Id)) || null;
+      if (rc === '200' || idVal) {
         confirmed = true;
-        contactUuid = (c && c.id) || null;
+        contactUuid = idVal;
       } else if (rc === '100') {
         confirmed = true;
       } else {
@@ -104,9 +107,10 @@ function getContactId_(invCode) {
 
   try {
     const res = callPeakAPI('get', '/contacts', null, { code });
+    Logger.log(`Contact GET raw [${code}]: ${JSON.stringify(res).slice(0, 300)}`);
     const contacts = res && res.PeakContacts && res.PeakContacts.contacts;
     const c = Array.isArray(contacts) ? contacts[0] : contacts;
-    const uuid = c && c.id;
+    const uuid = c && (c.id || c.contactId || c.Id);
     if (uuid) {
       cache[code] = uuid;
       props.setProperty(CONTACT_CACHE_KEY_, JSON.stringify(cache));
