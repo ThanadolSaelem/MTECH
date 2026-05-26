@@ -184,6 +184,89 @@ function clearContactSyncCache() {
   Logger.log('Contact sync cache cleared.');
 }
 
+// ─── Fix wrong-name contacts in PEAK ─────────────────────────────────────────
+/**
+ * แก้ชื่อ contact ใน PEAK ที่มี prefix ซ้ำ (เช่น "นายนายธัชกร" → "นายธัชกร")
+ *
+ * เนื่องจากโค้ดเก่าต่อ TITLE + NAME โดยไม่เช็คซ้ำ — contact ที่สร้างไปก่อน fix
+ * จะมีชื่อ prefix ซ้ำใน PEAK ฟังก์ชันนี้:
+ *   1. วิ่งผ่าน Sum sheet → คำนวณชื่อที่ถูกต้อง
+ *   2. GET contact จาก PEAK
+ *   3. PUT อัปเดตถ้าชื่อไม่ตรง
+ *   4. ล้าง contact cache ตอนจบ (force refresh UUID จาก PEAK รอบหน้า)
+ */
+function runFixContactNames(sheetName) {
+  preFlightChecks_();
+  sheetName = sheetName || getCurrentSumSheetName();
+  const ss = SpreadsheetApp.openById(getSpreadsheetId());
+  const sheet = getSheetByNameSmart_(ss, sheetName);
+  if (!sheet) throw new Error(`ไม่พบ Sheet "${sheetName}"`);
+
+  toast(`⏳ แก้ชื่อ Contact — ${sheetName}`, 'FinFin');
+
+  const data = getSumData_(sheet);
+  let countOk = 0, countSkip = 0, countError = 0;
+  const guard = makeTimeGuard_(5);
+  let stoppedEarly = false;
+
+  for (let i = 0; i < data.length; i++) {
+    if (guard.expired()) { stoppedEarly = true; break; }
+    const row = data[i];
+    const invCode = String(row[CONFIG.COL.INV] || '').trim();
+    if (!invCode) continue;
+
+    const title   = String(row[CONFIG.COL.TITLE] || '').trim();
+    const rawName = String(row[CONFIG.COL.NAME]  || '').trim();
+    const correctName = (rawName.startsWith(title) ? rawName : (title + rawName)).trim();
+    if (!correctName) { countSkip++; continue; }
+
+    try {
+      const getRes = callPeakAPI('get', '/contacts', null, { code: invCode });
+      const contacts = getRes && getRes.PeakContacts && getRes.PeakContacts.contacts;
+      const c = Array.isArray(contacts) ? contacts[0] : contacts;
+      if (!c || !(c.id || c.contactId || c.Id)) {
+        Logger.log(`Fix [${invCode}]: ไม่พบ contact ใน PEAK — ข้าม`);
+        countSkip++;
+        continue;
+      }
+      if (c.name === correctName) { countSkip++; continue; }
+
+      const oldName = c.name;
+      const payload = Object.assign({}, c, { name: correctName });
+      callPeakAPI('put', '/contacts', { PeakContacts: { contacts: [payload] } });
+      Logger.log(`Fixed [${invCode}]: "${oldName}" → "${correctName}"`);
+      countOk++;
+    } catch (e) {
+      Logger.log(`Fix failed [${invCode}]: ${e.message}`);
+      countError++;
+    }
+  }
+
+  PropertiesService.getScriptProperties().deleteProperty(CONTACT_CACHE_KEY_);
+
+  const tail = stoppedEarly ? ' ⏸️ หมดเวลา — รันซ้ำเพื่อทำต่อ' : '';
+  const summary = `Fix contact names เสร็จ — แก้: ${countOk}, ข้าม: ${countSkip}, Error: ${countError}${tail}`;
+  toast(summary, 'FinFin', 10);
+  Logger.log(summary);
+  return summary;
+}
+
+/**
+ * ทดสอบแก้ชื่อ 1 contact (run ก่อน runFixContactNames เพื่อ verify PUT endpoint)
+ */
+function testFixOneContact() {
+  const invCode = '1754102677';  // เปลี่ยนเป็นรหัสจริงในชีท
+  const newName = 'นายธัชกร โพธิจักร์';
+
+  const getRes = callPeakAPI('get', '/contacts', null, { code: invCode });
+  const c = getRes.PeakContacts.contacts[0];
+  Logger.log(`Current: ${c.name} (id=${c.id})`);
+
+  const payload = Object.assign({}, c, { name: newName });
+  const putRes = callPeakAPI('put', '/contacts', { PeakContacts: { contacts: [payload] } });
+  Logger.log(`PUT response: ${JSON.stringify(putRes).slice(0, 400)}`);
+}
+
 function testGetContact() {
   const invCode = '1752485138';
   const res = callPeakAPI('get', '/contacts', null, { code: invCode });
