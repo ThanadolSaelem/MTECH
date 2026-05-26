@@ -19,9 +19,9 @@ const CONTACT_SYNC_SAVE_N_  = 20;               // write cache every N new conta
 const CONTACT_SYNC_MAX_MS_  = 4.5 * 60 * 1000; // 4.5 min soft limit per call
 
 // ─── Thai name parsing ───────────────────────────────────────────────────────
-// PEAK prefixNameType mapping (verified: 1=นาย ✅, 2=นาง ✅, 3=คุณ ✅; 4=น.ส. — รอ verify)
-// PEAK dropdown มีเฉพาะ: ไม่มี / คุณ / นาย / นาง / นางสาว / อื่น ๆ (ไม่มี ด.ช./ด.ญ.)
-//   0 = ไม่มี, 1 = นาย, 2 = นาง, 3 = คุณ, 4 = น.ส./นางสาว
+// PEAK prefixNameType mapping (verified ✅ all 4 codes confirmed via debugCreateTestContacts)
+// PEAK dropdown: ไม่มี / คุณ / นาย / นาง / นางสาว / อื่น ๆ (ไม่มี ด.ช./ด.ญ.)
+//   0 = ไม่มี, 1 = นาย ✅, 2 = นาง ✅, 3 = คุณ ✅, 4 = น.ส./นางสาว ✅
 const THAI_PREFIXES_ = [
   { re: /^น\.ส\.\s*/,     code: 4, label: 'น.ส.' },
   { re: /^นางสาว\s*/,     code: 4, label: 'นางสาว' },
@@ -381,7 +381,7 @@ function debugCreateTestContacts() {
     { code: `TST-NAI-${ts}`,  name: 'นายทดสอบ หนึ่ง',   expected: 'นาย (code=1) ✅' },
     { code: `TST-NAA-${ts}`,  name: 'นางทดสอบ สอง',     expected: 'นาง (code=2) ✅' },
     { code: `TST-KHN-${ts}`,  name: 'คุณทดสอบ สาม',     expected: 'คุณ (code=3) ✅' },
-    { code: `TST-NSA-${ts}`,  name: 'น.ส.ทดสอบ สี่',    expected: 'น.ส. (code=4) — ยืนยัน dropdown ใน PEAK' },
+    { code: `TST-NSA-${ts}`,  name: 'น.ส.ทดสอบ สี่',    expected: 'น.ส./นางสาว (code=4) ✅' },
   ];
 
   // ล้าง cache เพื่อให้ POST จริง ไม่ใช่ skip
