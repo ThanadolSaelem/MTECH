@@ -19,18 +19,15 @@ const CONTACT_SYNC_SAVE_N_  = 20;               // write cache every N new conta
 const CONTACT_SYNC_MAX_MS_  = 4.5 * 60 * 1000; // 4.5 min soft limit per call
 
 // ─── Thai name parsing ───────────────────────────────────────────────────────
-// PEAK prefixNameType mapping (verified: 1=นาย ✅, 2=นาง ✅, 3=คุณ ✅; 4=น.ส. ยืนยันด้วย debugCreateTestContacts)
-//   0 = ไม่มี, 1 = นาย, 2 = นาง, 3 = คุณ, 4 = น.ส./นางสาว, 5 = ด.ช., 6 = ด.ญ.
+// PEAK prefixNameType mapping (verified: 1=นาย ✅, 2=นาง ✅, 3=คุณ ✅; 4=น.ส. — รอ verify)
+// PEAK dropdown มีเฉพาะ: ไม่มี / คุณ / นาย / นาง / นางสาว / อื่น ๆ (ไม่มี ด.ช./ด.ญ.)
+//   0 = ไม่มี, 1 = นาย, 2 = นาง, 3 = คุณ, 4 = น.ส./นางสาว
 const THAI_PREFIXES_ = [
   { re: /^น\.ส\.\s*/,     code: 4, label: 'น.ส.' },
   { re: /^นางสาว\s*/,     code: 4, label: 'นางสาว' },
   { re: /^นาง(?!สาว)\s*/, code: 2, label: 'นาง' },
   { re: /^นาย\s*/,        code: 1, label: 'นาย' },
   { re: /^คุณ\s*/,        code: 3, label: 'คุณ' },
-  { re: /^ด\.ช\.\s*/,     code: 5, label: 'ด.ช.' },
-  { re: /^ด\.ญ\.\s*/,     code: 6, label: 'ด.ญ.' },
-  { re: /^เด็กชาย\s*/,    code: 5, label: 'เด็กชาย' },
-  { re: /^เด็กหญิง\s*/,   code: 6, label: 'เด็กหญิง' },
 ];
 
 function _parseThaiName_(fullName) {
