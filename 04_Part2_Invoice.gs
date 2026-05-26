@@ -62,7 +62,9 @@ function runPart2_Invoice(sheetName) {
 
     const downPayment = Math.max(0, contractAmt - (installmentAmt * numInstallments));
     const dueDates    = calculateDueDates(contractDate, paymentDay, numInstallments);
-    const customerName = `${String(row[CONFIG.COL.TITLE] || '').trim()}${String(row[CONFIG.COL.NAME] || '').trim()}`.trim();
+    const title = String(row[CONFIG.COL.TITLE] || '').trim();
+    const rawName = String(row[CONFIG.COL.NAME] || '').trim();
+    const customerName = rawName.startsWith(title) ? rawName : (title + rawName).trim();
 
     writeSumCell_(sheet, i, invDocCol, CONFIG.PROCESSING_MARKER);
 
