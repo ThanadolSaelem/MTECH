@@ -19,15 +19,25 @@ OUT = "/home/user/MTECH/คู่มือการใช้งาน_MPTECH.doc
 SS  = "/home/user/MTECH/manual_screenshots"
 
 def ss(name):
-    new = f"{SS}/ss_{name}_new.png"
-    old = f"{SS}/ss_{name}.png"
-    return new if os.path.exists(new) else old
+    for candidate in [
+        f"{SS}/ss_{name}_new.png",
+        f"{SS}/ss_{name}.png",
+        f"{SS}/ss_{name}.jpg",
+    ]:
+        if not os.path.exists(candidate):
+            continue
+        try:
+            PILImage.open(candidate).verify()
+            return candidate
+        except Exception:
+            continue
+    return f"{SS}/ss_{name}.png"  # let caller fail with a clear path
 
 SS_SET   = ss("settings")
 SS_DASH  = ss("dashboard")
 SS_TASKS = ss("tasks")
 SS_LOGS  = ss("logs")
-SS_NOTIF = f"{SS}/ss_notifications.png"
+SS_NOTIF = ss("notifications")
 
 FONT  = "TH Sarabun New"
 IMG_W = Cm(15)  # 5,400,000 EMU
@@ -110,6 +120,12 @@ def add_para(doc, text, size=14, bold=False, color=None):
 def add_image(doc, path, caption=""):
     if not os.path.exists(path):
         add_para(doc, f"[ภาพ: {os.path.basename(path)} — ไม่พบไฟล์]",
+                 size=12, color=RGBColor(0xb9, 0x1c, 0x1c))
+        return
+    try:
+        PILImage.open(path).verify()
+    except Exception:
+        add_para(doc, f"[ภาพ: {os.path.basename(path)} — ไฟล์เสียหาย]",
                  size=12, color=RGBColor(0xb9, 0x1c, 0x1c))
         return
     p = doc.add_paragraph()
@@ -409,7 +425,27 @@ def build_new_chapters(doc):
         col_widths=[5.0, 5.5, 3, 4]
     )
 
-    add_heading(doc, "8.3  ผู้ดูแลระบบ", level=2)
+    add_heading(doc, "8.3  ข้อมูลการเชื่อมต่อ MPTECH", level=2)
+    add_para(doc,
+        "ข้อมูลด้านล่างนี้ใช้กรอกในหน้า Settings → Save Local "
+        "เพื่อให้โปรแกรมเชื่อมต่อกับ GAS ได้", size=13)
+    doc.add_paragraph()
+    add_table(doc,
+        ["รายการ", "ค่าที่ต้องกรอก"],
+        [
+            ["GAS Web App URL",
+             "https://script.google.com/macros/s/AKfycbwnBO4IdcSyIH3RBxCSgLjsVuKdsS_"
+             "Co3lCgZaZ2yCi8_XFo-PrYsZDC90tWW5dZNtm/exec"],
+            ["API Key", "finfin-secret-2026"],
+        ],
+        col_widths=[4.0, 14.5]
+    )
+    add_callout(doc, "📌",
+        "กรอกข้อมูลทั้ง 2 รายการในหน้า Settings → กด Save Local → กด Test Connection\n"
+        "ถ้า ● Connected (สีเขียว) แสดงที่มุมล่างซ้าย = เชื่อมต่อสำเร็จ พร้อมใช้งาน",
+        bg=(0xdc, 0xfc, 0xe7))
+
+    add_heading(doc, "8.4  ผู้ดูแลระบบ", level=2)
     add_callout(doc, "📌",
         "ทีม MPTECH — ติดต่อผ่าน Line หรือโทรตรงเมื่อพบปัญหาที่แก้ตามคู่มือแล้วยังไม่หาย\n"
         "ข้อมูลที่ควรเตรียม: Screenshot + ข้อความ Error เต็มๆ + ชื่อ Task ที่รัน + วันเวลา",

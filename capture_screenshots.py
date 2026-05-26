@@ -10,6 +10,7 @@ import subprocess
 DISPLAY = ":99"
 OUT_DIR = "/home/user/MTECH/manual_screenshots"
 APP_DIR = "/home/user/MTECH/finfin_client"
+APP_W, APP_H = 1100, 720
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -20,7 +21,7 @@ time.sleep(0.5)
 # Start Xvfb
 print("Starting Xvfb...")
 xvfb = subprocess.Popen(
-    ["Xvfb", DISPLAY, "-screen", "0", "1280x800x24", "-ac"],
+    ["Xvfb", DISPLAY, "-screen", "0", f"{APP_W}x{APP_H}x24", "-ac"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 )
 os.environ["DISPLAY"] = DISPLAY
@@ -31,7 +32,10 @@ sys.path.insert(0, APP_DIR)
 
 # Patch config so app shows Dashboard (not Settings) on startup
 import config as _cfg
-_cfg.load = lambda: {"gas_url": "http://localhost", "api_key": "testkey"}
+_cfg.load = lambda: {
+    "gas_url": "https://script.google.com/macros/s/AKfycbwnBO4IdcSyIH3RBxCSgLjsVuKdsS_Co3lCgZaZ2yCi8_XFo-PrYsZDC90tWW5dZNtm/exec",
+    "api_key": "finfin-secret-2026",
+}
 
 # Patch FinFinClient so network calls are no-ops
 from api import FinFinClient, FinFinError
@@ -123,12 +127,29 @@ app = [None]
 
 def capture_page(page_name):
     path = f"{OUT_DIR}/ss_{page_name}.png"
-    ret = os.system(f'scrot --quality 95 "{path}"')
-    if ret == 0 and os.path.exists(path) and os.path.getsize(path) > 1000:
+    # Capture only the app rectangle (0,0,APP_W,APP_H) — no black border
+    ret = os.system(
+        f'scrot --quality 95 --area "{path}" '
+        f'-- sh -c \'printf "%s %s %s %s" 0 0 {APP_W} {APP_H}\''
+    )
+    if ret != 0:
+        # Fallback: full display then PIL-crop
+        tmp = f"{OUT_DIR}/ss_{page_name}_raw.png"
+        ret = os.system(f'scrot --quality 95 "{tmp}"')
+        if ret == 0 and os.path.exists(tmp):
+            try:
+                from PIL import Image
+                with Image.open(tmp) as im:
+                    im.crop((0, 0, APP_W, APP_H)).save(path, quality=95)
+                os.remove(tmp)
+            except Exception as e:
+                os.rename(tmp, path)
+                print(f"  ⚠ PIL crop failed ({e}) — using full screenshot")
+    if os.path.exists(path) and os.path.getsize(path) > 1000:
         sz = os.path.getsize(path)
         print(f"  ✓ {page_name} → {path}  ({sz:,} bytes)")
     else:
-        print(f"  ✗ scrot failed for {page_name}")
+        print(f"  ✗ screenshot failed for {page_name}")
 
 
 def next_step():

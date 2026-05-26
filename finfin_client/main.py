@@ -211,7 +211,7 @@ class MTechApp(ctk.CTk):
         nav_items = [
             ("dashboard",     "Dashboard"),
             ("tasks",         "Tasks"),
-            ("notifications", "แจ้งเตือน"),
+            ("notifications", "Notifications"),
             ("settings",      "Settings"),
             ("logs",          "Logs"),
         ]
@@ -560,9 +560,11 @@ class MTechApp(ctk.CTk):
 
         self.e_connect = self._plain_field(form, "CONNECT_ID")
         self.e_token   = self._plain_field(form, "USER_TOKEN", show="•")
-        self.e_ss      = self._plain_field(form, "SPREADSHEET_ID")
+        self.e_ss      = self._plain_field(form, "SPREADSHEET_ID",
+                                           extract_sheet_id=True)
         self.e_ret     = self._plain_field(form,
-            "RETURN_SPREADSHEET_ID  (ว่างได้ ถ้าอยู่ใน Spreadsheet เดียวกัน)")
+            "RETURN_SPREADSHEET_ID  (ว่างได้ ถ้าอยู่ใน Spreadsheet เดียวกัน)",
+            extract_sheet_id=True)
 
         btns = ctk.CTkFrame(p, fg_color="transparent")
         btns.pack(fill="x", pady=(18, 0))
@@ -623,7 +625,7 @@ class MTechApp(ctk.CTk):
 
         hdr = ctk.CTkFrame(p, fg_color="transparent")
         hdr.pack(fill="x", pady=(0, 4))
-        ctk.CTkLabel(hdr, text="แจ้งเตือน", font=_F(32, True),
+        ctk.CTkLabel(hdr, text="Notifications", font=_F(32, True),
                      text_color=TXT).pack(side="left")
         ctk.CTkButton(hdr, text="Refresh", width=100,
             fg_color=BLUE, hover_color=BLUE_HOVER,
@@ -774,13 +776,22 @@ class MTechApp(ctk.CTk):
         e.pack(fill="x")
         setattr(self, f"_e_{cfg_key}", e)
 
-    def _plain_field(self, parent, label, show=None):
+    def _plain_field(self, parent, label, show=None, extract_sheet_id=False):
         ctk.CTkLabel(parent, text=label, font=_F(12), text_color=TXT2,
                      ).pack(anchor="w", pady=(12, 4))
         e = ctk.CTkEntry(parent, show=show, width=640,
                          fg_color=SURFACE, border_color=BORDER, text_color=TXT,
                          placeholder_text_color=TXT3, font=_F(13))
         e.pack(fill="x")
+        if extract_sheet_id:
+            def _on_focus_out(_event, entry=e):
+                raw = entry.get().strip()
+                m = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', raw)
+                if m:
+                    entry.delete(0, "end")
+                    entry.insert(0, m.group(1))
+            e.bind("<FocusOut>", _on_focus_out)
+            e.bind("<Return>",   _on_focus_out)
         return e
 
     # ── Actions ───────────────────────────────────────────────────────────────

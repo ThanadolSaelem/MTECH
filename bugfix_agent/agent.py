@@ -45,7 +45,7 @@ def _build_codebase() -> str:
 _CODEBASE = _build_codebase()
 
 _SYSTEM = f"""You are an expert Google Apps Script (GAS) developer specializing in Thai \
-acounting automation. The system (FinFin / MTECH) automates document creation in PEAK \
+accounting automation. The system (FinFin / MTECH) automates document creation in PEAK \
 accounting software using Google Sheets as the data source. It processes receipts (Part 1 \
 tax invoice), invoices (Part 2), late fees (Part 3), credit notes (Part 4), and statement \
 matching (Part 5).

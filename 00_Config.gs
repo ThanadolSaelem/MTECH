@@ -8,27 +8,28 @@
  *   - ไฟล์รับคืน       (Device returns → Credit Note)
  */
 
-// ─── PEAK Credentials (กรอกหลังได้รับจาก PEAK) ───────────────────────────
+// ─── PEAK Credentials (กรอกหลังได้รับจาก PEAK) ─────────────────────
 const CONFIG = {
-  CONNECT_ID: 'mptechcorporation_peakapi_uat',  // ConnectId จาก PEAK ZIP
-  CONNECT_PASSWORD: 'sJY3C7rB3QrrBpG4nXcR',    // ConnectKey จาก PEAK ZIP
-  USER_TOKEN: 'ccd8bef1-ce62-4432-9380-426bee768c34',  // MPTechCorporation UAT (15/05/2026)
-  BASE_URL: 'http://peakengineapidev.azurewebsites.net/api/v1',  // UAT
+  CONNECT_ID: 'mptechcorporation_peakapi',                  // ConnectId (Production)
+  CONNECT_PASSWORD: 'vpKCLvJuu5ABeyWaBwZo',                 // ConnectKey (Production)
+  USER_TOKEN: '83286c2d-c59b-4071-81a2-b3f6c16b0a95',       // User Token (Production)
+  BASE_URL: 'https://api.peakaccount.com/api/v1',            // Production
+  APPLICATION_CODE: 'M32GCAAA20',                            // ApplicationCode (Production — สำรองไว้)
 
-  // ─── Account Codes (ยืนยันกับ FinFin ก่อน deploy) ────────────────────────
+  // ─── Account Codes (ยืนยันกับ FinFin ก่อน deploy) ─────────────────────
   ACCOUNT_CODE_SALES: '410101',      // ขาย (ยืนยันใน PEAK UAT แล้ว — 410000 ไม่มีในระบบ)
   ACCOUNT_CODE_LATE_FEE: '420000',
   ACCOUNT_CODE_SERVICE_FEE: '410101',
   ACCOUNT_CODE_AR: '110000',
 
-  // ─── VAT / Payment Types ─────────────────────────────────────────────────
+  // ─── VAT / Payment Types ───────────────────────────────────────────────────
   // PEAK: vatType 1=ไม่มี VAT, 2=VAT 0%, 3=VAT 7%
   VAT_TYPE_7: 3,
   VAT_TYPE_NONE: 1,
   PMT_TRANSFER: 8,
   PMT_CASH: 1,
 
-  // ─── Google Sheet Settings ───────────────────────────────────────────────
+  // ─── Google Sheet Settings ─────────────────────────────────────────────────────
   SPREADSHEET_ID: '123EwnVGDbuaBg0HTsZhpdX8EgKvfa7nja9ngfenN5Zo',
 
   // Sheet สัญญาใหม่ (Part 2)
@@ -43,7 +44,7 @@ const CONFIG = {
   RETURN_SPREADSHEET_ID: 'SPREADSHEET_ID_OF_RETURN_FILE',
   RETURN_SHEET_NAME: 'ไฟล์รับคืน',
 
-  // ─── Sum Sheet Columns (รายละเอียดสัญญา — Mar 2026 layout) ───────────────
+  // ─── Sum Sheet Columns (รายละเอียดสัญญา — Mar 2026 layout) ─────────────────────
   // Header แถว 2, data เริ่มแถว 3
   SUM_HEADER_ROW: 2,
   COL: {
@@ -66,7 +67,7 @@ const CONFIG = {
     DUE_DATE:         16,  // วันที่ครบกำหนดค่างวด (MM.YY)
   },
 
-  // ─── Receipt Sheet Columns (รายการรับชำระ — source of truth) ─────────────
+  // ─── Receipt Sheet Columns (รายการรับชำระ — source of truth) ─────────────────
   // Header แถว 2 (row 1 = summary totals, row 3 เริ่ม data)
   RECEIPT_HEADER_ROW: 2,
   RECEIPT_COL: {
@@ -81,7 +82,7 @@ const CONFIG = {
     PEAK_DOC:     8,  // ← OUTPUT: เลขที่ใบกำกับ PEAK (auto-create column)
   },
 
-  // ─── SCB Bank Statement — รองรับ 2 format (auto-detect ใน Part 5) ────────
+  // ─── SCB Bank Statement — รองรับ 2 format (auto-detect ใน Part 5) ────────────────
   // Format A: RAW bank CSV export (16 cols, header แถว 1)
   STATEMENT_FORMAT_RAW: {
     HEADER_ROW: 1,
@@ -111,7 +112,7 @@ const CONFIG = {
   },
   STATEMENT_REPORT_NAME: 'STATEMENT_REPORT',
 
-  // ─── ไฟล์รับคืน Columns (0-based) ─────────────────────────────────────────
+  // ─── ไฟล์รับคืน Columns (0-based) ─────────────────────────────────────────────────
   RETURN_COL: {
     SEQ:          0,   // จำนวน (ลำดับ)
     RETURN_DATE:  1,   // วันที่รับคืน
@@ -136,19 +137,19 @@ const CONFIG = {
   // (confirm กับพี่นก: "ผ่อนต่อ finfin" อาจไม่ต้องออก CN เพราะโอนสัญญา)
   RETURN_WORKFLOW_ISSUE_CN: ['ขายส่ง Yellobe'],
 
-  // ─── Log Sheet ────────────────────────────────────────────────────────────
+  // ─── Log Sheet ─────────────────────────────────────────────────────────────────────
   LOG_SHEET_NAME: 'PEAK_LOG',
 
-  // ─── Batch & Status ──────────────────────────────────────────────────────
+  // ─── Batch & Status ──────────────────────────────────────────────────────────────
   BATCH_SIZE: 50,
   STATUS_PAID: ['จ่ายแล้ว', 'ปิดยอด'],
   PROCESSING_MARKER: 'PROCESSING',
   DUPLICATE_MARKER:  '[IN-PEAK]',   // เอกสารมีใน PEAK แล้วแต่ไม่รู้เลขที่ — ให้ user ค้นหาเอง
 
-  // ─── Dashboard ────────────────────────────────────────────────────────────
+  // ─── Dashboard ─────────────────────────────────────────────────────────────────────
   DASHBOARD_SHEET_NAME: 'DASHBOARD',
 
-  // ─── Backward-compat / legacy keys ───────────────────────────────────────
+  // ─── Backward-compat / legacy keys ─────────────────────────────────────────────
   STATEMENT_SHEET_NAME: 'SCB',
   SVC_FEE_COL: {
     AMT:  13,
@@ -156,7 +157,7 @@ const CONFIG = {
   },
 };
 
-// ─── Legacy letter-based aliases (Feb 2026 layout) ──────────────────────────
+// ─── Legacy letter-based aliases (Feb 2026 layout) ──────────────────────────────────
 // ⚠️ ใช้ใน Part 3 / 07_PollResults (ยังไม่ได้ migrate). เมื่อ Sum sheet เปลี่ยน
 // เป็น Mar layout ตัวอักษรเหล่านี้อาจชี้ไปที่ column ที่ไม่มีอยู่ → row[idx] = undefined
 // → logic เดิมจะ skip row อัตโนมัติ
