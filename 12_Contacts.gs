@@ -496,3 +496,68 @@ function debugContactCreate() {
   Logger.log('HTTP: ' + res.getResponseCode());
   Logger.log('BODY: ' + res.getContentText());
 }
+
+/**
+ * ทดสอบ _parseThaiName_ + POST contact จริงไปยัง PEAK สำหรับ prefix "อื่น ๆ"
+ *
+ * Phase 1 — parse เท่านั้น (ไม่เรียก API):
+ *   ดู log แต่ละชื่อว่า prefixNameType / prefixNameOther / firstName / lastName ถูกต้องไหม
+ *
+ * Phase 2 — POST contact ไปยัง PEAK:
+ *   สร้าง contact จริงแบบ code "TST-OTH-..." แล้ว GET กลับมาดู
+ *   เช็ค PEAK UI → ผู้ติดต่อ → search "TST-OTH" → ดู dropdown คำนำหน้า
+ *   ลบ contact ทดสอบใน PEAK UI หลังเทสเสร็จ
+ *
+ * ตั้งค่า CREATE_IN_PEAK = false ถ้าต้องการทดสอบ parse อย่างเดียวก่อน
+ */
+function debugProbeContactTypes() {
+  const CREATE_IN_PEAK = true;  // เปลี่ยนเป็น false ถ้าต้องการดู parse อย่างเดียว
+
+  const cases = [
+    { name: 'ว่าที่ ร.ต.หญิง ฌญาภัชน์ รอดพ้น',  expectPrefix: 'ว่าที่ ร.ต.หญิง', expectFirst: 'ฌญาภัชน์' },
+    { name: 'นพ.สมชาย ดีมาก',                    expectPrefix: 'นพ.',              expectFirst: 'สมชาย'   },
+    { name: 'ทพ.สมหญิง มีสุข',                   expectPrefix: 'ทพ.',              expectFirst: 'สมหญิง'  },
+    { name: 'พล.ต.ท.สมศักดิ์ เก่งมาก',           expectPrefix: 'พล.ต.ท.',          expectFirst: 'สมศักดิ์' },
+    { name: 'ด.ต.สุวรรณ ภักดี',                  expectPrefix: 'ด.ต.',             expectFirst: 'สุวรรณ'  },
+    { name: 'นายสมศักดิ์ ทองดี',                  expectPrefix: '',                  expectFirst: 'สมศักดิ์' },
+    { name: 'น.ส.มาลี ใจดี',                      expectPrefix: '',                  expectFirst: 'มาลี'    },
+  ];
+
+  Logger.log('=== Phase 1: Parse test ===');
+  for (const c of cases) {
+    const r = _parseThaiName_(c.name);
+    const ok = r.prefixNameOther === c.expectPrefix && r.firstName === c.expectFirst;
+    Logger.log(
+      `${ok ? '✅' : '❌'} "${c.name}"\n` +
+      `   → type=${r.prefixNameType} other="${r.prefixNameOther}" first="${r.firstName}" last="${r.lastName}"\n` +
+      `   → expect: other="${c.expectPrefix}" first="${c.expectFirst}"`
+    );
+  }
+
+  if (!CREATE_IN_PEAK) { Logger.log('CREATE_IN_PEAK=false — หยุดแค่ parse'); return; }
+
+  Logger.log('\n=== Phase 2: POST to PEAK ===');
+  const ts = Date.now();
+  const customCases = cases.filter(c => c.expectPrefix !== '');  // เฉพาะ "อื่น ๆ"
+
+  PropertiesService.getScriptProperties().deleteProperty(CONTACT_CACHE_KEY_);
+
+  const codeNameMap = {};
+  customCases.forEach((c, i) => { codeNameMap[`TST-OTH-${i}-${ts}`] = c.name; });
+  ensureContactsBatch_(codeNameMap);
+  Utilities.sleep(1500);
+
+  for (let i = 0; i < customCases.length; i++) {
+    const code = `TST-OTH-${i}-${ts}`;
+    try {
+      const res = callPeakAPI('get', '/contacts', null, { code });
+      const contacts = res && res.PeakContacts && res.PeakContacts.contacts;
+      const c = Array.isArray(contacts) ? contacts[0] : contacts;
+      Logger.log(`[${code}] name="${customCases[i].name}"`);
+      Logger.log(`  PEAK returned: prefixNameType=${c && c.prefixNameType} prefixNameOther="${c && c.prefixNameOther}" firstName="${c && c.firstName}" lastName="${c && c.lastName}"`);
+    } catch (e) {
+      Logger.log(`[${code}] GET error: ${e.message}`);
+    }
+  }
+  Logger.log('--- เสร็จ — ไปลบ contact TST-OTH-* ใน PEAK UI หลังเทสเสร็จ ---');
+}
