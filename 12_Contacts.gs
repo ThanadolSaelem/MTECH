@@ -18,6 +18,40 @@ const CONTACT_CACHE_KEY_    = 'PEAK_SYNCED_CONTACTS';
 const CONTACT_SYNC_SAVE_N_  = 20;               // write cache every N new contacts
 const CONTACT_SYNC_MAX_MS_  = 4.5 * 60 * 1000; // 4.5 min soft limit per call
 
+// ─── Contact type detection ──────────────────────────────────────────────────
+// PEAK contact type — verified ✅
+//   3 = นิติบุคคล (บจก./หจก./บริษัท/ห้างหุ้นส่วน)
+//   5 = บุคคลธรรมดา
+const CONTACT_TYPE_JURISTIC_   = 3;
+const CONTACT_TYPE_INDIVIDUAL_ = 5;
+
+// คำนำหน้านิติบุคคล — ถ้าชื่อขึ้นด้วย/ลงท้ายด้วยคำเหล่านี้ → type 3
+const JURISTIC_PATTERNS_ = [
+  /^บริษัท\s/,
+  /^บจก\.?\s*/,
+  /^บจ\.?\s*/,
+  /^หจก\.?\s*/,
+  /^หสน\.?\s*/,
+  /^ห้างหุ้นส่วน/,
+  /^ห้าง\s/,
+  /^ร้าน\s/,
+  /^สำนักงาน/,
+  /^โรงงาน/,
+  /^โรงเรียน/,
+  /^โรงพยาบาล/,
+  /^มูลนิธิ/,
+  /^สมาคม/,
+  /^สหกรณ์/,
+  /^กรม/,
+  /^กระทรวง/,
+  /จำกัด\s*(\(มหาชน\))?\s*$/,
+];
+
+function _isJuristic_(fullName) {
+  const s = String(fullName || '').trim();
+  return JURISTIC_PATTERNS_.some(re => re.test(s));
+}
+
 // ─── Thai name parsing ───────────────────────────────────────────────────────
 // PEAK prefixNameType mapping — verified ✅ codes เรียงตาม dropdown (ไม่นับ "ไม่มี")
 //   0 = ไม่มี, 1 = คุณ, 2 = นาย, 3 = นาง, 4 = นางสาว/น.ส.
@@ -71,31 +105,43 @@ function ensureContactsBatch_(codeNameMap) {
     }
 
     const displayName = (String(name || '').trim() || `สัญญา ${code}`).slice(0, 255);
-    const parsed = _parseThaiName_(displayName);
-    // ส่ง name แบบไม่มี prefix นำหน้า — PEAK split name ตาม space แรกเป็น firstName/lastName
-    // ถ้ามี prefix อยู่ใน name PEAK จะเอา prefix ไปเป็น firstName ทำให้ ชื่อจริง = "นาย" (ผิด)
-    // prefix อยู่ใน dropdown (prefixNameType) แทน
-    const peakName = parsed.prefixNameType > 0
-      ? `${parsed.firstName}${parsed.lastName ? ' ' + parsed.lastName : ''}`.trim()
-      : displayName;
-    let confirmed = false;
 
+    // ─── Build contact payload ตามประเภท: นิติบุคคล (type 3) หรือ บุคคลธรรมดา (type 5) ──
+    let contactPayload;
+    if (_isJuristic_(displayName)) {
+      // นิติบุคคล — ส่งชื่อตรงๆ ไม่ parse prefix/firstName/lastName
+      contactPayload = {
+        code,
+        name: displayName,
+        type: CONTACT_TYPE_JURISTIC_,
+      };
+    } else {
+      // บุคคลธรรมดา — parse คำนำหน้า + ชื่อจริง + นามสกุล
+      const parsed = _parseThaiName_(displayName);
+      // ส่ง name แบบไม่มี prefix นำหน้า — PEAK split name ตาม space แรกเป็น firstName/lastName
+      // ถ้ามี prefix อยู่ใน name PEAK จะเอา prefix ไปเป็น firstName ทำให้ ชื่อจริง = "นาย" (ผิด)
+      // prefix อยู่ใน dropdown (prefixNameType) แทน
+      const peakName = parsed.prefixNameType > 0
+        ? `${parsed.firstName}${parsed.lastName ? ' ' + parsed.lastName : ''}`.trim()
+        : displayName;
+      contactPayload = {
+        code,
+        name:           peakName,
+        type:           CONTACT_TYPE_INDIVIDUAL_,
+        prefixNameType: parsed.prefixNameType,
+        firstName:      parsed.firstName,
+        lastName:       parsed.lastName,
+      };
+    }
+
+    let confirmed = false;
     let postRes;
     let contactUuid = null;
     try {
       postRes = callPeakAPI('post', '/contacts/', {
-        PeakContacts: {
-          contacts: [{
-            code,
-            name:           peakName,
-            type:           5,
-            prefixNameType: parsed.prefixNameType,
-            firstName:      parsed.firstName,
-            lastName:       parsed.lastName,
-          }],
-        },
+        PeakContacts: { contacts: [contactPayload] },
       });
-      Logger.log(`Contact POST raw [${code}]: ${JSON.stringify(postRes).slice(0, 300)}`);
+      Logger.log(`Contact POST raw [${code}] type=${contactPayload.type}: ${JSON.stringify(postRes).slice(0, 300)}`);
     } catch (e) {
       const msg = String(e.message);
       if (/duplic|exist|already|มีอยู่/i.test(msg)) {
