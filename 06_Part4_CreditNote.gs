@@ -191,6 +191,9 @@ function buildCreditNotePayload(invCode, contactUuid, returnDate, creditAmt, pro
     issuedDate:  formatDateForAPI(returnDate),
     contact:     { id: contactUuid, code: String(invCode), name: customerName },
     taxStatus:   1,
+    // subType ตามมาตรา 86/10: 1=สินค้าส่งคืน, 2=คำนวณราคาผิด, 3=ใบกำกับออกผิด, 4=ลดราคา, 5=อื่น ๆ
+    // MTECH = คืนเครื่อง → 1
+    subType:     1,
     remark:      desc,
     products: [
       {
