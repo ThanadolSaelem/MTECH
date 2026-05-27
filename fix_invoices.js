@@ -44,6 +44,11 @@ async function gotoList(page) {
   await page.waitForSelector(SEARCH_SEL, { timeout: 30000 });
 }
 
+// Selectors (verified by user)
+const EDIT_BTN_SEL  = '#recordExternalDocumentDetail > div > div > div:nth-child(2) > span';
+const NOTE_INPUT_SEL = '[id="หมายเหตุสำหรับลูกค้า"]';  // id ภาษาไทย → ใช้ attr selector
+const SAVE_BTN_SEL  = '#quickEditTool > div > div > div > div.edit';
+
 async function fixNote(page, invCode, expectedNote) {
   // 1. ไปหน้า list + search
   await gotoList(page);
@@ -61,36 +66,24 @@ async function fixNote(page, invCode, expectedNote) {
   if (await codeEl.count() === 0) throw new Error('ไม่พบ invoice ใน search results');
   await codeEl.click();
 
-  // รอ detail โหลด — ใช้ i[class*="fa-question-circle"] (FA5 ใช้ class "fas fa-question-circle")
-  await page.waitForSelector('i[class*="fa-question-circle"]', { timeout: 15000 });
+  // 3. รอ detail page โหลด (ดูจาก edit button)
+  await page.waitForSelector(EDIT_BTN_SEL, { timeout: 15000 });
   await wait(800);
 
-  // 3. scroll ลงหา "หมายเหตุสำหรับลูกค้า" แล้วคลิก ?
-  await page.evaluate(() => window.scrollBy(0, 800));
-  await wait(500);
-
-  // ลองหา ? ที่อยู่ใกล้ label ก่อน
-  const scoped = page.locator(
-    '*:has-text("หมายเหตุสำหรับลูกค้า") i[class*="fa-question-circle"]'
-  ).last();
-
-  if (await scoped.count() > 0) {
-    await scoped.scrollIntoViewIfNeeded();
-    await scoped.click();
-  } else {
-    // fallback: ? ตัวสุดท้ายในหน้า (มักเป็น "หมายเหตุสำหรับลูกค้า")
-    const last = page.locator('i[class*="fa-question-circle"]').last();
-    await last.scrollIntoViewIfNeeded();
-    await last.click();
-  }
+  // 4. scroll + คลิกปุ่ม "แก้ไข" (เปิด quickEditTool)
+  const editBtn = page.locator(EDIT_BTN_SEL).first();
+  await editBtn.scrollIntoViewIfNeeded();
+  await editBtn.click();
   await wait(800);
 
-  // 4. รอ quickEditTool + อ่าน text เดิม
+  // 5. รอ textbox โผล่
   await page.waitForSelector('#quickEditTool', { timeout: 8000 });
-  const noteInput = page.locator('#quickEditTool textarea, #quickEditTool input').first();
+  const noteInput = page.locator(NOTE_INPUT_SEL).first();
   await noteInput.waitFor({ timeout: 5000 });
 
-  const current = (await noteInput.inputValue()).trim();
+  // อ่าน text เดิม (textbox อาจเป็น input หรือ textarea)
+  const current = (await noteInput.inputValue().catch(async () =>
+    (await noteInput.innerText().catch(() => '')))).trim();
   console.log(`   เดิม: "${current.slice(0, 70)}"`);
 
   if (current === expectedNote) {
@@ -98,14 +91,14 @@ async function fixNote(page, invCode, expectedNote) {
     return 'already_ok';
   }
 
-  // 5. เปลี่ยน text
+  // 6. เปลี่ยน text
   await noteInput.click({ clickCount: 3 });
   await wait(100);
   await noteInput.fill(expectedNote);
   await wait(300);
 
-  // 6. กด save
-  const saveBtn = page.locator('#quickEditTool > div > div > div > div.edit > i').first();
+  // 7. กด save
+  const saveBtn = page.locator(SAVE_BTN_SEL).first();
   await saveBtn.waitFor({ timeout: 5000 });
   await saveBtn.click();
   await wait(2000);
